@@ -19,9 +19,9 @@ targets:
         product: ZIPFoundation
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.starreader.personalreader.native
+        PRODUCT_BUNDLE_IDENTIFIER: dev.starreader.personalreader
         PRODUCT_NAME: StarReaderNative
-        INFOPLIST_KEY_CFBundleDisplayName: StarReader Native
+        INFOPLIST_KEY_CFBundleDisplayName: StarReader
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: 5.0
         IPHONEOS_DEPLOYMENT_TARGET: 17.0
