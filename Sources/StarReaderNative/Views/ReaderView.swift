@@ -52,7 +52,7 @@ struct ReaderView: View {
             .coordinateSpace(name: "readerScroll")
             .background(pageBackground)
             .onPreferenceChange(ParagraphFramesKey.self) { frames in
-                guard !frames.isEmpty else { return }
+                guard didRestorePosition, !frames.isEmpty else { return }
                 let nearest = frames.min { abs($0.value) < abs($1.value) }?.key ?? 0
                 currentParagraph = nearest
                 store.recordProgress(for: chapter, paragraph: nearest)
@@ -64,6 +64,7 @@ struct ReaderView: View {
                 currentParagraph = min(saved.paragraph, max(0, chapter.paragraphs.count - 1))
                 DispatchQueue.main.async {
                     proxy.scrollTo(currentParagraph, anchor: .top)
+                    didRestorePosition = true
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
