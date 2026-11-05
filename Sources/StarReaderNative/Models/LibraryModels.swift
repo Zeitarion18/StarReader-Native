@@ -113,7 +113,13 @@ struct LibrarySnapshot {
     func chapters(for work: String, volume: String) -> [LibraryChapter] {
         chapters
             .filter { $0.series == work && $0.volume == volume }
-            .sorted { chapterSortKey($0.displayTitle) < chapterSortKey($1.displayTitle) }
+            .sorted {
+                let left = chapterSortKey($0.displayTitle)
+                let right = chapterSortKey($1.displayTitle)
+                if left.0 != right.0 { return left.0 < right.0 }
+                if left.1 != right.1 { return left.1 < right.1 }
+                return left.2.localizedStandardCompare(right.2) == .orderedAscending
+            }
     }
 
     private func chapterSortKey(_ title: String) -> (Int, Int, String) {
