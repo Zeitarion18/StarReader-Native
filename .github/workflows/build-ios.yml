@@ -28,6 +28,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Generate native app icon
+        run: swift .ci/generate_icon.swift
+
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
@@ -57,9 +60,11 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.3.0", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "30", info.get("CFBundleVersion")
-          print("Verified Bundle ID, marketing version and build number for in-place upgrade.")
+          assert info.get("CFBundleShortVersionString") == "0.3.1", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "31", info.get("CFBundleVersion")
+          icon = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Assets.car")
+          assert icon.exists(), "Compiled asset catalog missing"
+          print("Verified Bundle ID, version, build number and compiled app icons.")
           PY
 
       - name: Package unsigned IPA
