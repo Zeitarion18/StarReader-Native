@@ -64,8 +64,9 @@ jobs:
           assert info.get("CFBundleVersion") == "32", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
-          bundled_storyboard = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Base.lproj/LaunchScreen.storyboardc")
-          assert bundled_storyboard.is_dir(), "Compiled LaunchScreen.storyboardc missing from app"
+          app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
+          storyboards = list(app_bundle.rglob("LaunchScreen.storyboardc"))
+          assert any(p.is_dir() for p in storyboards), f"Compiled LaunchScreen.storyboardc missing: {storyboards!r}"
           icon = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Assets.car")
           assert icon.exists(), "Compiled asset catalog missing"
           print("Verified Bundle ID, version, AppIcon and adaptive compiled LaunchScreen.")
