@@ -8,6 +8,7 @@ struct StarReaderNativeApp: App {
         WindowGroup {
             LibraryView(store: library)
                 .preferredColorScheme(.dark)
+                .environment(\.locale, Locale(identifier: "ru_RU"))
         }
     }
 }

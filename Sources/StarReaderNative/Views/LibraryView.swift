@@ -1,17 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-private enum StarStyle {
-    static let background = Color(red: 0.027, green: 0.037, blue: 0.075)
-    static let surface = Color(red: 0.075, green: 0.094, blue: 0.145)
-    static let surfaceRaised = Color(red: 0.100, green: 0.125, blue: 0.185)
-    static let accent = Color(red: 0.30, green: 0.82, blue: 0.91)
-    static let muted = Color(red: 0.60, green: 0.66, blue: 0.76)
-    static let outline = Color.white.opacity(0.065)
-}
-
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
+
     @State private var isImporterPresented = false
     @State private var isRecordsPresented = false
     @State private var isConfirmationPresented = false
@@ -21,29 +13,41 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    topBanner
+                VStack(alignment: .leading, spacing: 26) {
+                    introduction
 
-                    if store.snapshot.works.isEmpty {
+                    if store.snapshot.chapters.isEmpty {
                         emptyLibrary
                     } else {
-                        libraryContent
+                        if let latest = store.mostRecentChapter {
+                            continueReading(latest)
+                        }
+                        worksSection
                     }
 
-                    bottomActions
+                    notesShortcut
+
+                    HStack(spacing: 7) {
+                        Image(systemName: "lock.shield")
+                        Text("Только на твоём iPhone · Без подписки")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ReaderTheme.secondary.opacity(0.8))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 4)
                 }
-                .frame(maxWidth: 650)
+                .frame(maxWidth: 680)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.top, 22)
-                .padding(.bottom, 35)
+                .padding(.top, 18)
+                .padding(.bottom, 32)
             }
             .scrollIndicators(.hidden)
             .background {
-                StarStyle.background
+                ReaderTheme.background
                     .overlay(alignment: .top) {
                         LinearGradient(
-                            colors: [Color.cyan.opacity(0.075), .clear],
+                            colors: [ReaderTheme.accent.opacity(0.065), .clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -59,21 +63,19 @@ struct LibraryView: View {
                         isRecordsPresented = true
                     } label: {
                         Image(systemName: "text.book.closed")
-                            .font(.system(size: 17, weight: .semibold))
                     }
-                    .accessibilityLabel("Замечания и закладки")
+                    .accessibilityLabel("Заметки и закладки")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isImporterPresented = true
                     } label: {
                         Image(systemName: "square.and.arrow.down")
-                            .font(.system(size: 17, weight: .semibold))
                     }
-                    .accessibilityLabel("Импортировать библиотеку")
+                    .accessibilityLabel("Импортировать резервную копию")
                 }
             }
-            .toolbarBackground(StarStyle.background, for: .navigationBar)
+            .toolbarBackground(ReaderTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationDestination(for: String.self) { work in
                 WorkDetailView(store: store, work: work)
@@ -97,9 +99,9 @@ struct LibraryView: View {
                     guard let url = urls.first, !isImporting else { return }
                     isImporting = true
                     Task {
-                        let hasAccess = url.startAccessingSecurityScopedResource()
+                        let access = url.startAccessingSecurityScopedResource()
                         defer {
-                            if hasAccess { url.stopAccessingSecurityScopedResource() }
+                            if access { url.stopAccessingSecurityScopedResource() }
                             isImporting = false
                         }
                         do {
@@ -114,11 +116,11 @@ struct LibraryView: View {
                 }
             }
             .confirmationDialog(
-                "Подтвердить перенос библиотеки",
+                "Восстановить библиотеку?",
                 isPresented: $isConfirmationPresented,
                 titleVisibility: .visible
             ) {
-                Button("Импортировать библиотеку") {
+                Button("Импортировать") {
                     do {
                         try store.commitPendingImport()
                         isSuccessPresented = true
@@ -131,15 +133,15 @@ struct LibraryView: View {
                 }
             } message: {
                 if let summary = store.pendingSummary {
-                    Text("Будут импортированы: \(summary.workCount) произведений, \(summary.volumeCount) томов, \(summary.chapterCount) глав, \(summary.noteCount) замечаний, \(summary.bookmarkCount) закладок и \(summary.originalCount) оригинальных DOCX. Записи из отсутствующих глав: \(summary.unlinkedNoteCount) замечаний и \(summary.unlinkedBookmarkCount) закладок — они также сохранятся. Исходный ZIP будет сохранён как резервная копия.")
+                    Text("\(summary.workCount) произведений · \(summary.volumeCount) томов · \(summary.chapterCount) глав · \(summary.noteCount) замечаний · \(summary.bookmarkCount) закладок · \(summary.originalCount) DOCX. Несвязанные записи (\(summary.unlinkedNoteCount) замечаний и \(summary.unlinkedBookmarkCount) закладок) тоже будут сохранены. Старые данные останутся в резервной копии.")
                 } else {
-                    Text("Будет восстановлена библиотека из ZIP.")
+                    Text("Библиотека будет восстановлена из выбранного ZIP.")
                 }
             }
-            .alert("Библиотека восстановлена", isPresented: $isSuccessPresented) {
-                Button("Открыть", role: .cancel) {}
+            .alert("Импорт завершён", isPresented: $isSuccessPresented) {
+                Button("Отлично", role: .cancel) {}
             } message: {
-                Text("Проверь количество глав, замечаний и закладок. Копию исходного ZIP сохрани в приложении «Файлы».")
+                Text("Библиотека восстановлена локально. Проверь произведения, заметки, закладки и прогресс чтения.")
             }
             .alert("StarReader", isPresented: Binding(
                 get: { store.statusMessage != nil },
@@ -150,172 +152,130 @@ struct LibraryView: View {
                 Text(store.statusMessage ?? "")
             }
         }
-        .tint(StarStyle.accent)
+        .tint(ReaderTheme.accent)
         .preferredColorScheme(.dark)
     }
 
-    private var topBanner: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(StarStyle.surfaceRaised)
-                    .frame(width: 58, height: 58)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18)
-                            .strokeBorder(StarStyle.outline, lineWidth: 1)
-                    }
-                Image(systemName: "books.vertical.fill")
-                    .font(.system(size: 25, weight: .light))
-                    .foregroundStyle(StarStyle.accent)
-            }
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("ЛИЧНАЯ КОЛЛЕКЦИЯ")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(2.4)
+                .foregroundStyle(ReaderTheme.accent)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Твоя личная библиотека")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Чтение, которое всегда с тобой")
-                    .font(.system(size: 12))
-                    .foregroundStyle(StarStyle.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
+            Text("Библиотека")
+                .font(.system(size: 31, weight: .bold, design: .rounded))
+                .foregroundStyle(ReaderTheme.text)
+
+            Text("\(store.snapshot.works.count) произведений · \(store.snapshot.chapters.count) глав")
+                .font(.system(size: 13))
+                .foregroundStyle(ReaderTheme.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var emptyLibrary: some View {
-        VStack(spacing: 19) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [StarStyle.accent.opacity(0.22), StarStyle.accent.opacity(0.04)],
-                            center: .center,
-                            startRadius: 5,
-                            endRadius: 90
-                        )
+    private func continueReading(_ chapter: LibraryChapter) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeading("Продолжить чтение", count: nil)
+
+            NavigationLink(value: chapter) {
+                HStack(alignment: .center, spacing: 15) {
+                    BookCover(
+                        title: chapter.series,
+                        index: store.snapshot.works.firstIndex(of: chapter.series) ?? 0
                     )
-                    .frame(width: 138, height: 138)
-                Circle()
-                    .strokeBorder(StarStyle.accent.opacity(0.17), lineWidth: 1)
-                    .frame(width: 112, height: 112)
-                Image(systemName: "book.closed.fill")
-                    .font(.system(size: 48, weight: .ultraLight))
-                    .foregroundStyle(StarStyle.accent)
-                    .shadow(color: StarStyle.accent.opacity(0.4), radius: 16)
-            }
 
-            VStack(spacing: 8) {
-                Text("Здесь начнётся история")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(chapter.series)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(ReaderTheme.secondary)
+                            .lineLimit(2)
 
-                Text("Перенеси произведения из старой читалки. Главы, заметки и закладки останутся с тобой.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(StarStyle.muted)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                        Text(chapter.displayTitle)
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(ReaderTheme.text)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
 
-            importButton
+                        Spacer(minLength: 0)
 
-            Label("Локально и без подписки", systemImage: "lock.shield")
-                .font(.system(size: 12))
-                .foregroundStyle(StarStyle.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 29)
-        .background(StarStyle.surface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(StarStyle.outline, lineWidth: 1)
-        }
-    }
+                        HStack {
+                            Text("Продолжить")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(ReaderTheme.accent)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(ReaderTheme.accent)
+                            Spacer()
+                            Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(ReaderTheme.text)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 119)
 
-    private var importButton: some View {
-        Button {
-            isImporterPresented = true
-        } label: {
-            HStack(spacing: 10) {
-                if isImporting {
-                    ProgressView().tint(StarStyle.background)
-                } else {
-                    Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 18, weight: .semibold))
                 }
-                Text(isImporting ? "Проверяем ZIP…" : "Импортировать библиотеку")
-                    .font(.system(size: 15, weight: .bold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .multilineTextAlignment(.center)
+                .padding(15)
+                .background(ReaderTheme.surfaceHigh, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 19)
+                        .strokeBorder(ReaderTheme.accent.opacity(0.19), lineWidth: 1)
+                }
+                .overlay(alignment: .bottom) {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.08))
+                            Capsule()
+                                .fill(ReaderTheme.accent)
+                                .frame(
+                                    width: geometry.size.width * CGFloat(
+                                        min(max(store.progress(for: chapter.id).percent, 0), 100) / 100
+                                    )
+                                )
+                        }
+                    }
+                    .frame(height: 3)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 1)
+                }
             }
-            .foregroundStyle(StarStyle.background)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .padding(.horizontal, 12)
-            .background(
-                LinearGradient(
-                    colors: [Color(red: 0.42, green: 0.91, blue: 0.96), StarStyle.accent],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-            )
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-        .disabled(isImporting)
-        .accessibilityLabel("Импортировать библиотеку из ZIP")
     }
 
-    private var libraryContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Мои произведения")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Spacer(minLength: 8)
-                Text("\(store.snapshot.works.count)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(StarStyle.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(StarStyle.accent.opacity(0.10), in: Capsule())
-            }
+    private var worksSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            sectionHeading("Произведения", count: store.snapshot.works.count)
 
-            ForEach(store.snapshot.works, id: \.self) { work in
+            ForEach(Array(store.snapshot.works.enumerated()), id: \.element) { index, work in
                 NavigationLink(value: work) {
-                    HStack(spacing: 14) {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(StarStyle.accent.opacity(0.14))
-                            .frame(width: 52, height: 65)
-                            .overlay {
-                                Image(systemName: "book.closed.fill")
-                                    .font(.system(size: 22, weight: .light))
-                                    .foregroundStyle(StarStyle.accent)
-                            }
-                        VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 14) {
+                        BookCover(title: work, index: index, compact: true)
+
+                        VStack(alignment: .leading, spacing: 9) {
                             Text(work)
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text("\(store.volumes(for: work).count) томов · \(store.snapshot.chapters.filter { $0.series == work }.count) глав")
+                                .foregroundStyle(ReaderTheme.text)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+
+                            let chapters = store.snapshot.chapters.filter { $0.series == work }.count
+                            Text("\(store.volumes(for: work).count) томов · \(chapters) глав")
                                 .font(.system(size: 12))
-                                .foregroundStyle(StarStyle.muted)
+                                .foregroundStyle(ReaderTheme.secondary)
                         }
-                        Spacer(minLength: 3)
+                        Spacer(minLength: 2)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(StarStyle.muted)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ReaderTheme.secondary.opacity(0.7))
                     }
-                    .padding(14)
-                    .background(StarStyle.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .padding(13)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 17).strokeBorder(StarStyle.outline, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 18)
+                            .strokeBorder(ReaderTheme.hairline, lineWidth: 1)
                     }
                 }
                 .buttonStyle(.plain)
@@ -323,38 +283,77 @@ struct LibraryView: View {
         }
     }
 
-    private var bottomActions: some View {
-        VStack(spacing: 11) {
-            if !store.snapshot.works.isEmpty {
-                importButton
-            }
-
-            Button {
-                isRecordsPresented = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "text.book.closed")
-                        .foregroundStyle(StarStyle.accent)
-                    Text("Замечания и закладки")
-                        .foregroundStyle(.white.opacity(0.90))
+    private var notesShortcut: some View {
+        Button {
+            isRecordsPresented = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "bookmark.square")
+                    .font(.system(size: 20))
+                    .foregroundStyle(ReaderTheme.accent)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Заметки и закладки")
                         .font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                    Text("\(store.annotations.count + store.bookmarks.count)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(StarStyle.muted)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(StarStyle.muted)
+                        .foregroundStyle(ReaderTheme.text)
+                    Text("\(store.annotations.count) замечаний · \(store.bookmarks.count) закладок")
+                        .font(.system(size: 12))
+                        .foregroundStyle(ReaderTheme.secondary)
                 }
-                .padding(16)
-                .background(StarStyle.surface, in: RoundedRectangle(cornerRadius: 16))
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ReaderTheme.secondary)
             }
-            .buttonStyle(.plain)
+            .padding(16)
+            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
 
-            Text("StarReader Native · Preview 0.3.1")
-                .font(.system(size: 11))
-                .foregroundStyle(StarStyle.muted.opacity(0.6))
-                .padding(.top, 6)
+    private var emptyLibrary: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "books.vertical")
+                .font(.system(size: 42, weight: .ultraLight))
+                .foregroundStyle(ReaderTheme.accent)
+                .frame(height: 58)
+            Text("Твои истории начнутся здесь")
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .foregroundStyle(ReaderTheme.text)
+                .multilineTextAlignment(.center)
+            Text("Перенеси библиотеку из резервного ZIP. Тексты, позиции чтения и заметки останутся с тобой.")
+                .font(.system(size: 13))
+                .foregroundStyle(ReaderTheme.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                isImporterPresented = true
+            } label: {
+                Label(isImporting ? "Проверяем ZIP…" : "Импортировать ZIP", systemImage: "square.and.arrow.down")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ReaderTheme.background)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(ReaderTheme.accent, in: RoundedRectangle(cornerRadius: 13))
+            }
+            .disabled(isImporting)
+            .padding(.top, 5)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 21))
+    }
+
+    private func sectionHeading(_ title: String, count: Int?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.system(size: 19, weight: .bold, design: .rounded))
+                .foregroundStyle(ReaderTheme.text)
+            Spacer(minLength: 6)
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ReaderTheme.secondary)
+            }
         }
     }
 }
@@ -364,29 +363,88 @@ private struct WorkDetailView: View {
     let work: String
 
     var body: some View {
-        List {
-            let volumes = store.volumes(for: work)
-            if volumes.isEmpty {
-                ContentUnavailableView("Томов пока нет", systemImage: "books.vertical")
-            } else {
-                ForEach(volumes) { volume in
-                    NavigationLink(value: volume) {
-                        HStack(spacing: 11) {
-                            Image(systemName: "books.vertical.fill")
-                                .foregroundStyle(StarStyle.accent)
-                            Text(volume.title)
-                                .font(.system(size: 16, weight: .medium))
-                                .fixedSize(horizontal: false, vertical: true)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .center, spacing: 17) {
+                    BookCover(title: work, index: store.snapshot.works.firstIndex(of: work) ?? 0)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("ПРОИЗВЕДЕНИЕ")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.5)
+                            .foregroundStyle(ReaderTheme.accent)
+                        Text(work)
+                            .font(.system(size: 20, weight: .bold, design: .serif))
+                            .foregroundStyle(ReaderTheme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Тома")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(ReaderTheme.text)
+
+                    let volumes = store.volumes(for: work)
+                    if volumes.isEmpty {
+                        missingSection("Тома пока не добавлены")
+                    } else {
+                        ForEach(Array(volumes.enumerated()), id: \.element.id) { index, volume in
+                            NavigationLink(value: volume) {
+                                HStack(spacing: 13) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 13)
+                                            .fill(ReaderTheme.accent.opacity(0.10))
+                                            .frame(width: 49, height: 53)
+                                        Image(systemName: "books.vertical")
+                                            .font(.system(size: 20))
+                                            .foregroundStyle(ReaderTheme.accent)
+                                    }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(volume.title)
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundStyle(ReaderTheme.text)
+                                        Text("\(store.chapters(for: work, volume: volume.title).count) глав")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(ReaderTheme.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(ReaderTheme.secondary)
+                                }
+                                .padding(13)
+                                .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 17))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.vertical, 9)
                     }
                 }
             }
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .padding(.bottom, 20)
         }
-        .scrollContentBackground(.hidden)
-        .background(StarStyle.background)
-        .navigationTitle(work)
+        .scrollIndicators(.hidden)
+        .background(ReaderTheme.background.ignoresSafeArea())
+        .navigationTitle("Произведение")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                ReaderBackButton()
+            }
+        }
+        .toolbarBackground(ReaderTheme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+
+    private func missingSection(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 14))
+            .foregroundStyle(ReaderTheme.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(30)
+            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18))
     }
 }
 
@@ -394,34 +452,96 @@ private struct VolumeDetailView: View {
     @ObservedObject var store: LibraryStore
     let volume: LibraryVolume
 
+    private var chapters: [LibraryChapter] {
+        store.chapters(for: volume.series, volume: volume.title)
+    }
+
     var body: some View {
-        List {
-            let chapters = store.chapters(for: volume.series, volume: volume.title)
-            if chapters.isEmpty {
-                ContentUnavailableView("В этом томе пока нет глав", systemImage: "text.book.closed")
-            } else {
-                ForEach(chapters) { chapter in
-                    NavigationLink(value: chapter) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(chapter.displayTitle)
-                                .font(.system(size: 15, weight: .medium))
-                                .fixedSize(horizontal: false, vertical: true)
-                            HStack(spacing: 9) {
-                                Text("\(chapter.paragraphs.count) абзацев")
-                                Text("·")
-                                Text(store.progress(for: chapter.id).percent.formatted(.number.precision(.fractionLength(0))) + "%")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(volume.series)
+                        .font(.system(size: 12))
+                        .foregroundStyle(ReaderTheme.secondary)
+                        .lineLimit(2)
+                    Text(volume.title)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(ReaderTheme.text)
+                    Text("\(chapters.count) глав")
+                        .font(.system(size: 13))
+                        .foregroundStyle(ReaderTheme.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if chapters.isEmpty {
+                    ReaderSurface {
+                        Text("Здесь пока нет глав.")
+                            .foregroundStyle(ReaderTheme.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                    }
+                } else {
+                    ForEach(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                        let duplicateNumber = chapters.prefix(index + 1)
+                            .filter { $0.displayTitle == chapter.displayTitle }.count
+                        let duplicates = chapters.filter { $0.displayTitle == chapter.displayTitle }.count
+
+                        NavigationLink(value: chapter) {
+                            HStack(alignment: .center, spacing: 13) {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(ReaderTheme.accent.opacity(0.10))
+                                    .frame(width: 42, height: 48)
+                                    .overlay {
+                                        Text("\(index + 1)")
+                                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(ReaderTheme.accent)
+                                    }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(chapter.displayTitle)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(ReaderTheme.text)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    HStack(spacing: 6) {
+                                        if duplicates > 1 {
+                                            Text("Вариант \(duplicateNumber)")
+                                            Text("·")
+                                        }
+                                        Text("\(chapter.paragraphs.count) абз.")
+                                        Text("·")
+                                        Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
+                                    }
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(ReaderTheme.secondary)
+                                }
+                                Spacer(minLength: 1)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(ReaderTheme.secondary)
                             }
-                            .font(.system(size: 12))
-                            .foregroundStyle(StarStyle.muted)
+                            .padding(13)
+                            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 17))
                         }
-                        .padding(.vertical, 7)
+                        .buttonStyle(.plain)
                     }
                 }
             }
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .padding(.bottom, 20)
         }
-        .scrollContentBackground(.hidden)
-        .background(StarStyle.background)
+        .scrollIndicators(.hidden)
+        .background(ReaderTheme.background.ignoresSafeArea())
         .navigationTitle(volume.title)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                ReaderBackButton()
+            }
+        }
+        .toolbarBackground(ReaderTheme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
     }
 }

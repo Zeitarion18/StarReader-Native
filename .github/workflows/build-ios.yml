@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.3.2", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "32", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.4.0", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "40", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")

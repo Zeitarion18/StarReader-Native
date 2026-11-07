@@ -35,6 +35,23 @@ final class LibraryStore: ObservableObject {
     func progress(for chapterID: String) -> ReaderProgress {
         progressByBook[chapterID] ?? .zero
     }
+    /// Most recent existing chapter. Detached notes and deleted chapters
+    /// remain in storage but are never offered as a reading shortcut.
+    var mostRecentChapter: LibraryChapter? {
+        guard let raw = stateObject["progress"] as? [String: [String: Any]] else {
+            return nil
+        }
+        return snapshot.chapters
+            .filter { raw[$0.id] != nil }
+            .max { a, b in
+                let aDate = raw[a.id]?["updatedAt"] as? String ?? ""
+                let bDate = raw[b.id]?["updatedAt"] as? String ?? ""
+                if aDate != bDate { return aDate < bDate }
+                return (progressByBook[a.id]?.percent ?? 0) <
+                    (progressByBook[b.id]?.percent ?? 0)
+            }
+    }
+
 
     func chapter(for id: String) -> LibraryChapter? {
         snapshot.chapters.first(where: { $0.id == id })
