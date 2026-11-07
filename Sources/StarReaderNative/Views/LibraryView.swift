@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
     @State private var isImporterPresented = false
+    @State private var isRecordsPresented = false
     @State private var isConfirmationPresented = false
     @State private var isSuccessPresented = false
 
@@ -20,6 +21,15 @@ struct LibraryView: View {
             .navigationTitle("StarReader")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isRecordsPresented = true
+                    } label: {
+                        Image(systemName: "text.book.closed")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .accessibilityLabel("Замечания и закладки")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isImporterPresented = true
@@ -38,6 +48,9 @@ struct LibraryView: View {
             }
             .navigationDestination(for: LibraryChapter.self) { chapter in
                 ReaderView(store: store, chapter: chapter)
+            }
+            .navigationDestination(isPresented: $isRecordsPresented) {
+                NotesAndBookmarksView(store: store)
             }
             .fileImporter(
                 isPresented: $isImporterPresented,
@@ -190,6 +203,13 @@ struct LibraryView: View {
             }
 
             Section {
+                Button {
+                    isRecordsPresented = true
+                } label: {
+                    Label("Замечания (\(store.annotations.count)) и закладки (\(store.bookmarks.count))",
+                          systemImage: "text.book.closed")
+                        .foregroundStyle(Color.cyan)
+                }
                 Button {
                     isImporterPresented = true
                 } label: {
