@@ -94,7 +94,7 @@ struct LibraryView: View {
                 }
             } message: {
                 if let summary = store.pendingSummary {
-                    Text("Будут импортированы: \(summary.workCount) произведений, \(summary.volumeCount) томов, \(summary.chapterCount) глав, \(summary.noteCount) замечаний, \(summary.bookmarkCount) закладок и \(summary.originalCount) оригинальных DOCX. Исходный ZIP сохранится в резервной копии.")
+                    Text("Будут импортированы: \(summary.workCount) произведений, \(summary.volumeCount) томов, \(summary.chapterCount) глав, \(summary.noteCount) замечаний, \(summary.bookmarkCount) закладок и \(summary.originalCount) оригинальных DOCX. Записи из отсутствующих глав: \(summary.unlinkedNoteCount) замечаний и \(summary.unlinkedBookmarkCount) закладок — они также сохранятся. Исходный ZIP останется в резервной копии.")
                 } else {
                     Text("Данные текущей библиотеки будут заменены импортируемой копией.")
                 }
