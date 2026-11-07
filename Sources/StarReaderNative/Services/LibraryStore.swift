@@ -5,6 +5,8 @@ import Combine
 final class LibraryStore: ObservableObject {
     @Published private(set) var snapshot = LibrarySnapshot(works: [], volumes: [], chapters: [])
     @Published private(set) var progressByBook: [String: ReaderProgress] = [:]
+    @Published private(set) var annotations: [ReaderAnnotation] = []
+    @Published private(set) var bookmarks: [ReaderBookmark] = []
     @Published private(set) var pendingSummary: ImportSummary?
     @Published var statusMessage: String?
 
@@ -34,6 +36,55 @@ final class LibraryStore: ObservableObject {
         progressByBook[chapterID] ?? .zero
     }
 
+    func chapter(for id: String) -> LibraryChapter? {
+        snapshot.chapters.first(where: { $0.id == id })
+    }
+
+    func annotations(for chapterID: String) -> [ReaderAnnotation] {
+        annotations.filter { $0.bookId == chapterID }
+    }
+
+    func hasBookmark(chapterID: String, paragraph: Int) -> Bool {
+        bookmarks.contains { $0.bookId == chapterID && $0.paragraph == paragraph }
+    }
+
+    var unlinkedAnnotationCount: Int {
+        let ids = Set(snapshot.chapters.map(\.id))
+        return annotations.filter { !ids.contains($0.bookId) }.count
+    }
+
+    var unlinkedBookmarkCount: Int {
+        let ids = Set(snapshot.chapters.map(\.id))
+        return bookmarks.filter { !ids.contains($0.bookId) }.count
+    }
+
+    func addBookmark(for chapter: LibraryChapter, paragraph: Int, offset: Int = 0) {
+        let safeParagraph = min(max(0, paragraph), max(0, chapter.paragraphs.count - 1))
+        guard !hasBookmark(chapterID: chapter.id, paragraph: safeParagraph) else {
+            statusMessage = "Закладка в этом абзаце уже существует."
+            return
+        }
+
+        let id = UUID().uuidString
+        let newObject: [String: Any] = [
+            "id": id,
+            "bookId": chapter.id,
+            "para": safeParagraph,
+            "offset": max(0, offset),
+            "title": chapter.displayTitle + " · абз. " + String(safeParagraph + 1),
+            "createdAt": ISO8601DateFormatter().string(from: Date())
+        ]
+        var originals = stateObject["bookmarks"] as? [[String: Any]] ?? []
+        originals.append(newObject)
+        stateObject["bookmarks"] = originals
+        do {
+            try saveState()
+            loadRecordCollections()
+        } catch {
+            statusMessage = "Не удалось сохранить закладку: \(error.localizedDescription)"
+        }
+    }
+
     func stageImport(from url: URL) async throws {
         let imported = try await Task.detached(priority: .userInitiated) {
             try TransferImporter.read(from: url)
@@ -49,26 +100,50 @@ final class LibraryStore: ObservableObject {
 
     func commitPendingImport() throws {
         guard let transfer = pendingTransfer else { return }
+        let fm = FileManager.default
+        let imports = rootURL.appendingPathComponent("Imports", isDirectory: true)
+        try fm.createDirectory(at: imports, withIntermediateDirectories: true)
 
-        let fileManager = FileManager.default
+        let identifier = UUID().uuidString
+        let archiveURL = imports.appendingPathComponent("StarReader-" + identifier + ".zip")
+        let backupDir = imports.appendingPathComponent("BeforeImport-" + identifier, isDirectory: true)
+        let stagingDir = imports.appendingPathComponent("Staging-" + identifier, isDirectory: true)
+        try fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: stagingDir) }
+
+        // Keep the original archive and a recoverable snapshot of the old data
+        // before changing any existing library files.
+        try transfer.archiveData.write(to: archiveURL, options: .atomic)
         let originalsURL = rootURL.appendingPathComponent("originals", isDirectory: true)
-        let importsURL = rootURL.appendingPathComponent("Imports", isDirectory: true)
-
-        try fileManager.createDirectory(at: importsURL, withIntermediateDirectories: true)
-        let backupURL = importsURL.appendingPathComponent("StarReader-\(UUID().uuidString).zip")
-        try transfer.archiveData.write(to: backupURL, options: .atomic)
-
-        if fileManager.fileExists(atPath: originalsURL.path) {
-            try fileManager.removeItem(at: originalsURL)
+        let targets: [URL] = [libraryURL, stateURL, originalsURL]
+        for target in targets where fm.fileExists(atPath: target.path) {
+            try fm.copyItem(at: target, to: backupDir.appendingPathComponent(target.lastPathComponent))
         }
-        try fileManager.createDirectory(at: originalsURL, withIntermediateDirectories: true)
 
+        try transfer.libraryData.write(to: stagingDir.appendingPathComponent("qt_library.json"), options: .atomic)
+        try transfer.stateData.write(to: stagingDir.appendingPathComponent("preview_state.json"), options: .atomic)
+        let stagedOriginals = stagingDir.appendingPathComponent("originals", isDirectory: true)
+        try fm.createDirectory(at: stagedOriginals, withIntermediateDirectories: true)
         for (name, data) in transfer.originals {
-            try data.write(to: originalsURL.appendingPathComponent(name), options: .atomic)
+            try data.write(to: stagedOriginals.appendingPathComponent(name), options: .atomic)
         }
 
-        try transfer.libraryData.write(to: libraryURL, options: .atomic)
-        try transfer.stateData.write(to: stateURL, options: .atomic)
+        do {
+            for target in targets {
+                let source = stagingDir.appendingPathComponent(target.lastPathComponent)
+                if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+                try fm.moveItem(at: source, to: target)
+            }
+        } catch {
+            // Restore each previous file, even if a write failed midway.
+            for target in targets {
+                let previous = backupDir.appendingPathComponent(target.lastPathComponent)
+                if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
+                if fm.fileExists(atPath: previous.path) { try? fm.copyItem(at: previous, to: target) }
+            }
+            throw error
+        }
 
         pendingTransfer = nil
         pendingSummary = nil
@@ -77,10 +152,10 @@ final class LibraryStore: ObservableObject {
 
     func recordProgress(for chapter: LibraryChapter, paragraph: Int, offset: Int = 0) {
         let safeParagraph = min(max(0, paragraph), max(0, chapter.paragraphs.count - 1))
-        let safeOffset = max(0, offset)
-        let before = chapter.paragraphs.prefix(safeParagraph).reduce(0) { $0 + $1.text.count }
         let currentLength = chapter.paragraphs.indices.contains(safeParagraph)
-            ? chapter.paragraphs[safeParagraph].text.count : 0
+            ? chapter.paragraphs[safeParagraph].text.unicodeScalars.count : 0
+        let safeOffset = min(max(0, offset), currentLength)
+        let before = chapter.paragraphs.prefix(safeParagraph).reduce(0) { $0 + $1.text.unicodeScalars.count }
         let total = max(1, chapter.totalCharacters)
         let percent = min(100, max(0, Double(before + min(safeOffset, currentLength)) / Double(total) * 100))
         let progress = ReaderProgress(paragraph: safeParagraph, offset: safeOffset, percent: percent)
@@ -99,8 +174,7 @@ final class LibraryStore: ObservableObject {
         stateObject["progress"] = progressObject
 
         do {
-            let data = try JSONSerialization.data(withJSONObject: stateObject, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: stateURL, options: .atomic)
+            try saveState()
         } catch {
             statusMessage = "Не удалось сохранить позицию чтения: \(error.localizedDescription)"
         }
@@ -110,6 +184,8 @@ final class LibraryStore: ObservableObject {
         guard FileManager.default.fileExists(atPath: libraryURL.path) else {
             snapshot = LibrarySnapshot(works: [], volumes: [], chapters: [])
             progressByBook = [:]
+            annotations = []
+            bookmarks = []
             stateObject = freshState()
             return
         }
@@ -136,9 +212,25 @@ final class LibraryStore: ObservableObject {
                 )
             }
             progressByBook = parsed
+            loadRecordCollections()
         } catch {
             statusMessage = "Не удалось открыть локальную библиотеку: \(error.localizedDescription)"
         }
+    }
+
+    private func loadRecordCollections() {
+        let rawNotes = stateObject["annotations"] as? [[String: Any]] ?? []
+        let rawBookmarks = stateObject["bookmarks"] as? [[String: Any]] ?? []
+        annotations = rawNotes.compactMap(ReaderAnnotation.parse)
+        bookmarks = rawBookmarks.compactMap(ReaderBookmark.parse)
+        if rawNotes.count != annotations.count || rawBookmarks.count != bookmarks.count {
+            statusMessage = "Некоторые записи повреждены. Исходный JSON сохранён без изменений."
+        }
+    }
+
+    private func saveState() throws {
+        let data = try JSONSerialization.data(withJSONObject: stateObject, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: stateURL, options: .atomic)
     }
 
     private func freshState() -> [String: Any] {
