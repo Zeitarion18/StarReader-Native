@@ -9,6 +9,8 @@ struct ImportSummary: Sendable {
     let noteCount: Int
     let bookmarkCount: Int
     let originalCount: Int
+    let unlinkedNoteCount: Int
+    let unlinkedBookmarkCount: Int
 }
 
 struct ImportedTransfer: Sendable {
@@ -192,10 +194,17 @@ enum TransferImporter {
               state["schema"] as? Int == 1,
               state["progress"] is [String: Any],
               state["settings"] is [String: Any],
-              state["annotations"] is [Any],
-              state["bookmarks"] is [Any] else {
+              let rawNotes = state["annotations"] as? [[String: Any]],
+              let rawBookmarks = state["bookmarks"] as? [[String: Any]],
+              rawNotes.allSatisfy({ ReaderAnnotation.parse($0) != nil }),
+              rawBookmarks.allSatisfy({ ReaderBookmark.parse($0) != nil }) else {
+            // Do not allow an import to succeed if notes or bookmarks would
+            // become invisible because they contain malformed records.
             throw TransferImportError.invalidState
         }
+
+        let unlinkedNotes = rawNotes.filter { !bookIDs.contains($0["bookId"] as? String ?? "") }.count
+        let unlinkedBookmarks = rawBookmarks.filter { !bookIDs.contains($0["bookId"] as? String ?? "") }.count
 
         var originals: [String: Data] = [:]
         for (path, data) in verifiedFiles where path.hasPrefix("originals/") {
@@ -215,9 +224,11 @@ enum TransferImporter {
                 workCount: works.count,
                 volumeCount: volumes.count,
                 chapterCount: books.count,
-                noteCount: (state["annotations"] as? [Any])?.count ?? 0,
-                bookmarkCount: (state["bookmarks"] as? [Any])?.count ?? 0,
-                originalCount: originals.count
+                noteCount: rawNotes.count,
+                bookmarkCount: rawBookmarks.count,
+                originalCount: originals.count,
+                unlinkedNoteCount: unlinkedNotes,
+                unlinkedBookmarkCount: unlinkedBookmarks
             )
         )
     }
