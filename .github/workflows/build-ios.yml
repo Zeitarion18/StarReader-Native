@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+# Collapse redundant push/PR builds while iterating on the same branch.
+concurrency:
+  group: reader-native-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-15
@@ -42,6 +47,20 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
+
+      - name: Verify app identity and release version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import plistlib
+          path = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Info.plist")
+          with path.open("rb") as file:
+              info = plistlib.load(file)
+          assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
+          assert info.get("CFBundleShortVersionString") == "0.3.0", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "30", info.get("CFBundleVersion")
+          print("Verified Bundle ID, marketing version and build number for in-place upgrade.")
+          PY
 
       - name: Package unsigned IPA
         run: |
