@@ -22,6 +22,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.starreader.personalreader
         PRODUCT_NAME: StarReaderNative
         INFOPLIST_KEY_CFBundleDisplayName: StarReader
+        MARKETING_VERSION: 0.3.0
+        CURRENT_PROJECT_VERSION: 30
+        INFOPLIST_KEY_CFBundleShortVersionString: "0.3.0"
+        INFOPLIST_KEY_CFBundleVersion: "30"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: 5.0
         IPHONEOS_DEPLOYMENT_TARGET: 17.0
