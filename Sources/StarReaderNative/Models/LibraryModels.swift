@@ -21,7 +21,7 @@ struct LibraryChapter: Identifiable, Hashable {
     }
 
     var totalCharacters: Int {
-        paragraphs.reduce(0) { $0 + $1.text.count }
+        paragraphs.reduce(0) { $0 + $1.text.unicodeScalars.count }
     }
 }
 
@@ -56,10 +56,13 @@ struct LibrarySnapshot {
             throw LibraryModelError.invalidLibrary
         }
 
-        let volumes = rawVolumes.compactMap { item -> LibraryVolume? in
+        var volumes: [LibraryVolume] = []
+        for item in rawVolumes {
             guard let series = item["series"] as? String,
-                  let title = item["title"] as? String else { return nil }
-            return LibraryVolume(series: series, title: title)
+                  let title = item["title"] as? String else {
+                throw LibraryModelError.invalidLibrary
+            }
+            volumes.append(LibraryVolume(series: series, title: title))
         }
 
         var chapters: [LibraryChapter] = []
@@ -68,16 +71,20 @@ struct LibrarySnapshot {
                   let series = item["series"] as? String,
                   let volume = item["volume"] as? String,
                   let rawParagraphs = item["paragraphs"] as? [[String: Any]] else {
-                continue
+                // Fail explicitly instead of silently dropping a book.
+                throw LibraryModelError.invalidLibrary
             }
 
-            let paragraphs = rawParagraphs.enumerated().compactMap { index, paragraph -> ReaderParagraph? in
-                guard let text = paragraph["text"] as? String else { return nil }
-                return ReaderParagraph(
+            var paragraphs: [ReaderParagraph] = []
+            for (index, paragraph) in rawParagraphs.enumerated() {
+                guard let text = paragraph["text"] as? String else {
+                    throw LibraryModelError.invalidLibrary
+                }
+                paragraphs.append(ReaderParagraph(
                     index: index,
                     text: text,
                     heading: paragraph["heading"] as? Bool ?? false
-                )
+                ))
             }
 
             chapters.append(
