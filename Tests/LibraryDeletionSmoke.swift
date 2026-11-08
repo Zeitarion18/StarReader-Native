@@ -87,8 +87,9 @@ enum LibraryDeletionSmoke {
             from: libraryData, stateData: stateData
         )
         precondition(empty.deletedIDs.isEmpty)
-        precondition(bookIDs(try dict(empty.libraryData)) == ["a", "b", "c"])
-        precondition((try dict(empty.libraryData)["volumes"] as! [[String: Any]]).count == 2)
+        let afterEmpty = try dict(empty.libraryData)
+        precondition(bookIDs(afterEmpty) == ["a", "b", "c"])
+        precondition((afterEmpty["volumes"] as! [[String: Any]]).count == 2)
 
         do {
             _ = try LibraryDeletion.remove(
@@ -98,7 +99,8 @@ enum LibraryDeletionSmoke {
         } catch LibraryDeletion.Failure.notFound {
             // Expected.
         }
-        precondition((try dict(libraryData))["books"] != nil)
+        let originalUnchanged = try dict(libraryData)
+        precondition(bookIDs(originalUnchanged) == ["a", "b", "c"])
         print("PASS: single duplicate title, entire volume, empty volume, " +
               "related records, orphan preservation, unknown fields, missing target.")
     }
