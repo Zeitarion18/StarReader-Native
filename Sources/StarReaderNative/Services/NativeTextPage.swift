@@ -1,19 +1,19 @@
 import Foundation
 import SwiftUI
 import UIKit
+import QuartzCore
 
-/// Uses the same UIKit text engine for both pagination and visible text.
-/// Unlike the older CoreText canvas there is no custom glyph drawing or
-/// invisible layer stealing touches from the native iOS selection handles.
+/// A TextKit page boundary is a character offset at the START of a whole line.
+/// Unlike v0.4.4, a page never scrolls a giant UITextView to a fractional Y
+/// coordinate; its UIKit text view owns only that page's exact attributed slice.
 @MainActor
 final class NativeTextPagePlan {
     let source: ChapterPagination
     let pageWidth: CGFloat
     let pageHeight: CGFloat
-    let pageStarts: [CGFloat]
     let pageCharacters: [Int]
 
-    var pageCount: Int { pageStarts.count }
+    var pageCount: Int { pageCharacters.count }
 
     init(source: ChapterPagination, pageWidth: CGFloat, pageHeight: CGFloat) {
         self.source = source
@@ -30,29 +30,26 @@ final class NativeTextPagePlan {
         container.heightTracksTextView = false
         storage.addLayoutManager(manager)
         manager.addTextContainer(container)
-
         manager.ensureLayout(for: container)
+
         let glyphRange = manager.glyphRange(for: container)
+        var starts: [Int] = [0]
+        var lastStartY: CGFloat = 0
 
-        var offsets: [CGFloat] = [0]
-        var characters: [Int] = [0]
-        var lastStart: CGFloat = 0
-        let visibleHeight = self.pageHeight
-
+        // Leave a small tolerance for glyph ascenders/descenders at the
+        // viewport edge. No line will ever be cut in two by a page boundary.
+        let usableHeight = max(80, self.pageHeight - 8)
         manager.enumerateLineFragments(forGlyphRange: glyphRange) {
             rect, _, _, glyphs, _ in
-            // A new page starts at a real TextKit line, never halfway through it.
-            if rect.maxY > lastStart + visibleHeight &&
-               rect.minY > lastStart + 1 {
-                let nextCharacter = manager.characterIndexForGlyph(at: glyphs.location)
-                guard nextCharacter > (characters.last ?? -1) else { return }
-                offsets.append(rect.minY)
-                characters.append(nextCharacter)
-                lastStart = rect.minY
+            if rect.maxY > lastStartY + usableHeight &&
+                rect.minY > lastStartY + 1 {
+                let character = manager.characterIndexForGlyph(at: glyphs.location)
+                guard character > (starts.last ?? -1) else { return }
+                starts.append(character)
+                lastStartY = rect.minY
             }
         }
-        pageStarts = offsets
-        pageCharacters = characters
+        pageCharacters = starts
     }
 
     func clamp(_ index: Int) -> Int {
@@ -64,8 +61,12 @@ final class NativeTextPagePlan {
         var low = 0
         var high = pageCharacters.count - 1
         while low < high {
-            let mid = (low + high + 1) / 2
-            if pageCharacters[mid] <= character { low = mid } else { high = mid - 1 }
+            let middle = (low + high + 1) / 2
+            if pageCharacters[middle] <= character {
+                low = middle
+            } else {
+                high = middle - 1
+            }
         }
         return low
     }
@@ -74,14 +75,34 @@ final class NativeTextPagePlan {
         source.position(atUTF16: pageCharacters[clamp(page)])
     }
 
-    func verticalOffset(for page: Int) -> CGFloat {
-        pageStarts[clamp(page)]
+    func range(at page: Int) -> NSRange {
+        let index = clamp(page)
+        let begin = pageCharacters[index]
+        let end = index + 1 < pageCharacters.count
+            ? pageCharacters[index + 1]
+            : source.attributedText.length
+        return NSRange(location: begin, length: max(0, end - begin))
+    }
+
+    func attributedPage(at page: Int) -> NSAttributedString {
+        source.attributedText.attributedSubstring(from: range(at: page))
+    }
+
+    /// Convert source-chapter note ranges to offsets local to this page.
+    func noteRanges(at page: Int) -> [NSRange] {
+        let bounds = range(at: page)
+        let pageEnd = NSMaxRange(bounds)
+        return source.highlightRanges.compactMap { note in
+            let lower = max(note.location, bounds.location)
+            let upper = min(NSMaxRange(note), pageEnd)
+            guard upper > lower else { return nil }
+            return NSRange(location: lower - bounds.location, length: upper - lower)
+        }
     }
 }
 
-/// One UITextView holds the complete chapter, but each page exposes exactly
-/// one line-aligned viewport. UITextView provides the native selection handles,
-/// magnifier, Copy/Select All actions and the system edit menu.
+/// A self-contained, non-scrolling page. UIKit still owns its selection,
+/// magnifier and edit menu; swiping/tapping only turns discrete pages.
 struct NativeSelectablePage: UIViewRepresentable {
     let plan: NativeTextPagePlan
     let pageIndex: Int
@@ -104,16 +125,19 @@ struct NativeSelectablePage: UIViewRepresentable {
         let view = ReaderUITextView(frame: .zero, textContainer: container)
         view.isEditable = false
         view.isSelectable = true
-        view.isScrollEnabled = true
+        // Disabling UITextView scrolling prevents previous-page ghost lines
+        // and prevents UIKit from clamping/repositioning a page offset.
+        view.isScrollEnabled = false
         view.showsVerticalScrollIndicator = false
         view.showsHorizontalScrollIndicator = false
-        view.alwaysBounceVertical = false
         view.bounces = false
         view.backgroundColor = UIColor(red: 0.035, green: 0.045, blue: 0.075, alpha: 1)
         view.textColor = UIColor(red: 0.94, green: 0.955, blue: 0.985, alpha: 1)
-        view.textContainerInset = .zero
+        // This 10pt gutter on BOTH sides is included in plan.pageWidth.
+        // The left gutter houses the orange note marker.
+        view.textContainerInset = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
         view.contentInset = .zero
-        view.scrollIndicatorInsets = .zero
+        view.contentInsetAdjustmentBehavior = .never
         view.keyboardDismissMode = .none
         view.dataDetectorTypes = []
         view.textDragInteraction?.isEnabled = false
@@ -152,55 +176,56 @@ struct NativeSelectablePage: UIViewRepresentable {
         coordinator.onMakeNote = onMakeNote
         coordinator.plan = plan
 
-        if view.currentPlan !== plan {
-            coordinator.isUpdating = true
-            // Never rewrite text on ordinary page turns. Doing so would
-            // dismiss Apple's selection handles and often change the layout.
-            view.attributedText = plan.source.attributedText
-            view.currentPlan = plan
-            view.selectedRange = NSRange(location: 0, length: 0)
-            coordinator.isUpdating = false
-        }
+        let page = plan.clamp(pageIndex)
+        coordinator.chapterStart = plan.range(at: page).location
 
-        let targetY = plan.verticalOffset(for: pageIndex)
-        if abs(view.contentOffset.y - targetY) > 0.75 {
-            coordinator.isUpdating = true
-            view.setContentOffset(CGPoint(x: 0, y: targetY), animated: false)
-            coordinator.isUpdating = false
+        if view.currentPlan !== plan || view.currentPage != page {
+            // This is the ONLY time the displayed slice is replaced.
+            // Ordinary menu interactions never rebuild the selected text.
+            view.attributedText = plan.attributedPage(at: page)
+            view.currentPlan = plan
+            view.currentPage = page
+            view.selectedRange = NSRange(location: 0, length: 0)
+            view.setNoteRanges(plan.noteRanges(at: page))
         }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         weak var view: ReaderUITextView?
         var plan: NativeTextPagePlan?
+        var chapterStart = 0
         var onTurn: ((Int) -> Void)?
         var onTapCenter: (() -> Void)?
         var onMakeNote: ((ReaderTextSelection) -> Void)?
-        var isUpdating = false
 
-        // Apple's own text selection editing menu, extended by one action.
         func textView(
             _ textView: UITextView,
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            guard range.length > 0, let plan,
-                  let selected = plan.source.selection(from: range) else {
+            guard range.length > 0, let plan else {
                 return UIMenu(children: suggestedActions)
             }
-
+            // UIKit reports a page-local UTF-16 range. Notes are stored in
+            // immutable chapter-global UTF-16 / Unicode-scalar coordinates.
+            let global = NSRange(
+                location: chapterStart + range.location,
+                length: range.length
+            )
+            guard let selection = plan.source.selection(from: global) else {
+                return UIMenu(children: suggestedActions)
+            }
             let makeNote = UIAction(
                 title: "Замечание",
                 image: UIImage(systemName: "highlighter")
             ) { [weak self] _ in
-                self?.onMakeNote?(selected)
+                self?.onMakeNote?(selection)
             }
             return UIMenu(children: [makeNote] + suggestedActions)
         }
 
         @objc func swipe(_ recognizer: UISwipeGestureRecognizer) {
-            guard recognizer.state == .ended,
-                  let view,
+            guard recognizer.state == .ended, let view,
                   view.selectedRange.length == 0 else { return }
             onTurn?(recognizer.direction == .left ? 1 : -1)
         }
@@ -222,41 +247,76 @@ struct NativeSelectablePage: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            // Do not block UITextView's private native text-selection gestures.
             true
-        }
-
-        func scrollViewWillEndDragging(
-            _ scrollView: UIScrollView,
-            withVelocity velocity: CGPoint,
-            targetContentOffset: UnsafeMutablePointer<CGPoint>
-        ) {
-            guard let plan else { return }
-            let current = plan.pageStarts.enumerated().min {
-                abs($0.element - targetContentOffset.pointee.y) <
-                abs($1.element - targetContentOffset.pointee.y)
-            }?.offset ?? 0
-            targetContentOffset.pointee.y = plan.verticalOffset(for: current)
-        }
-
-        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-            guard !isUpdating, let plan else { return }
-            // Vertical drag is not a page-turn gesture. Recenter to the
-            // current page, retaining horizontal native selection gestures.
-            let index = plan.pageStarts.enumerated().min {
-                abs($0.element - scrollView.contentOffset.y) <
-                abs($1.element - scrollView.contentOffset.y)
-            }?.offset ?? 0
-            if abs(plan.verticalOffset(for: index) - scrollView.contentOffset.y) > 1 {
-                scrollView.setContentOffset(
-                    CGPoint(x: 0, y: plan.verticalOffset(for: index)),
-                    animated: false
-                )
-            }
         }
     }
 }
 
+/// The orange quote rail follows the actual TextKit highlight glyphs,
+/// not the entire paragraph. It has no gesture recognizers and cannot
+/// interfere with native copy/selection handles.
 final class ReaderUITextView: UITextView {
     var currentPlan: NativeTextPagePlan?
+    var currentPage = -1
+
+    private let railLayer = CAShapeLayer()
+    private var highlightedRanges: [NSRange] = []
+
+    func setNoteRanges(_ ranges: [NSRange]) {
+        highlightedRanges = ranges
+        if railLayer.superlayer == nil {
+            railLayer.fillColor = nil
+            railLayer.strokeColor = UIColor(
+                red: 1, green: 0.59, blue: 0.25, alpha: 0.96
+            ).cgColor
+            railLayer.lineWidth = 3
+            railLayer.lineCap = .round
+            layer.addSublayer(railLayer)
+        }
+        refreshRails()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        refreshRails()
+    }
+
+    private func refreshRails() {
+        railLayer.frame = bounds
+        let path = UIBezierPath()
+        guard bounds.width > 0, bounds.height > 0 else {
+            railLayer.path = nil
+            return
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        for note in highlightedRanges {
+            let textEnd = textStorage.length
+            let lower = max(0, min(note.location, textEnd))
+            let upper = max(lower, min(NSMaxRange(note), textEnd))
+            guard upper > lower else { continue }
+            let glyphs = layoutManager.glyphRange(
+                forCharacterRange: NSRange(location: lower, length: upper - lower),
+                actualCharacterRange: nil
+            )
+            var top = CGFloat.greatestFiniteMagnitude
+            var bottom: CGFloat = 0
+            layoutManager.enumerateEnclosingRects(
+                forGlyphRange: glyphs,
+                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                in: textContainer
+            ) { rect, _ in
+                guard rect.height > 0 else { return }
+                top = min(top, rect.minY)
+                bottom = max(bottom, rect.maxY)
+            }
+            guard top.isFinite, bottom > top else { continue }
+            let start = max(1, top + textContainerInset.top)
+            let finish = min(bounds.height - 1, bottom + textContainerInset.top)
+            guard finish > start else { continue }
+            path.move(to: CGPoint(x: 4, y: start))
+            path.addLine(to: CGPoint(x: 4, y: finish))
+        }
+        railLayer.path = path.cgPath
+    }
 }

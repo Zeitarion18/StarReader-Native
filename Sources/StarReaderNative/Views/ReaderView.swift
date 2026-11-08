@@ -176,7 +176,7 @@ struct ReaderView: View {
 
     private func pageReader(in size: CGSize) -> some View {
         GeometryReader { geometry in
-            let pageWidth = min(geometry.size.width - 36, 700)
+            let pageWidth = min(geometry.size.width - 24, 712)
             let pageHeight = geometry.size.height - 20
 
             HStack(spacing: 0) {
@@ -222,7 +222,8 @@ struct ReaderView: View {
     }
 
     private func rebuildPagination(for size: CGSize, force: Bool = false) {
-        let width = min(size.width - 36, 700)
+        let width = min(size.width - 24, 712)
+        let contentWidth = width - 20  // 10pt note rail gutters on each side
         let height = size.height - 20
         guard width >= 150, height >= 170 else { return }
         if !force,
@@ -241,7 +242,7 @@ struct ReaderView: View {
         let next = ChapterPagination(
             chapter: chapter,
             annotations: linkedAnnotations,
-            pageWidth: width,
+            pageWidth: contentWidth,
             pageHeight: height,
             fontSize: fontSize,
             lineSpacing: lineSpacing,
@@ -251,7 +252,7 @@ struct ReaderView: View {
         // Native UITextView selection handles use this exact same layout.
         let native = NativeTextPagePlan(
             source: next,
-            pageWidth: width,
+            pageWidth: contentWidth,
             pageHeight: height
         )
         pagination = next
@@ -300,6 +301,7 @@ struct ReaderView: View {
 
                     ForEach(chapter.paragraphs) { paragraph in
                         VStack(alignment: .leading, spacing: 6) {
+                            let notes = annotations(at: paragraph.index)
                             highlightedText(paragraph)
                                 .font(.system(
                                     size: paragraph.heading ? fontSize + 2 : fontSize,
@@ -307,9 +309,17 @@ struct ReaderView: View {
                                     design: .serif
                                 ))
                                 .lineSpacing(lineSpacing)
+                                .padding(.leading, 12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .overlay(alignment: .leading) {
+                                    if !notes.isEmpty {
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(ReaderTheme.accent)
+                                            .frame(width: 3)
+                                            .padding(.leading, 2)
+                                    }
+                                }
 
-                            let notes = annotations(at: paragraph.index)
                             if !notes.isEmpty {
                                 NotePills(notes: notes) { selectedAnnotation = $0 }
                             }
@@ -406,41 +416,32 @@ struct ReaderView: View {
         let length = scalars.count
         guard length > 0 else { return Text(" ") }
 
-        let notes = annotations(at: paragraph.index)
-        guard !notes.isEmpty else {
-            return Text(paragraph.text).foregroundColor(ReaderTheme.text.opacity(0.93))
-        }
-
         var boundaries = Set([0, length])
-        var ranges: [(Int, Int, String)] = []
-        for item in notes {
-            let lastParagraph = max(item.paragraph, item.endParagraph ?? item.paragraph)
-            let start = paragraph.index == item.paragraph ? item.start : 0
-            let end = paragraph.index == lastParagraph ? item.end : length
-            let lower = min(max(0, start), length)
-            let upper = min(max(0, end), length)
-            if lower < upper {
-                boundaries.insert(lower)
-                boundaries.insert(upper)
-                ranges.append((lower, upper, item.categoryTitle))
-            }
+        var ranges: [(Int, Int)] = []
+        for note in annotations(at: paragraph.index) {
+            let last = max(note.paragraph, note.endParagraph ?? note.paragraph)
+            let lower = min(max(0, paragraph.index == note.paragraph ? note.start : 0), length)
+            let upper = min(max(0, paragraph.index == last ? note.end : length), length)
+            guard lower < upper else { continue }
+            boundaries.insert(lower)
+            boundaries.insert(upper)
+            ranges.append((lower, upper))
         }
 
         let cuts = boundaries.sorted()
-        var text = Text("")
-        if cuts.count >= 2 {
-            for index in 0..<(cuts.count - 1) {
-                let left = cuts[index], right = cuts[index + 1]
-                guard right > left else { continue }
-                let part = String(String.UnicodeScalarView(scalars[left..<right]))
-                var fragment = Text(part).foregroundColor(ReaderTheme.text.opacity(0.93))
-                if let match = ranges.first(where: { $0.0 <= left && $0.1 >= right }) {
-                    fragment = Text(part).foregroundColor(noteColor(match.2)).underline()
-                }
-                text = text + fragment
+        var result = AttributedString()
+        for i in 0..<(cuts.count - 1) {
+            let lower = cuts[i], upper = cuts[i + 1]
+            guard upper > lower else { continue }
+            let content = String(String.UnicodeScalarView(scalars[lower..<upper]))
+            var fragment = AttributedString(content)
+            fragment.foregroundColor = ReaderTheme.text.opacity(0.93)
+            if ranges.contains(where: { $0.0 <= lower && $0.1 >= upper }) {
+                fragment.backgroundColor = Color.orange.opacity(0.19)
             }
+            result.append(fragment)
         }
-        return text
+        return Text(result)
     }
 
     private func annotations(at index: Int) -> [ReaderAnnotation] {

@@ -22,6 +22,7 @@ private struct ChapterParagraphSpan {
 final class ChapterPagination {
     let chapters: [ChapterPage]
     let attributedText: NSAttributedString
+    let highlightRanges: [NSRange]
     let framesetter: CTFramesetter
     let pageWidth: CGFloat
     let pageHeight: CGFloat
@@ -77,6 +78,7 @@ final class ChapterPagination {
         )
         var spans: [ChapterParagraphSpan] = []
         var scalarCounts: [Int] = []
+        var noteHighlights: [NSRange] = []
 
         for paragraph in chapter.paragraphs {
             let start = rendered.length
@@ -107,13 +109,21 @@ final class ChapterPagination {
 
                 let utf16Lower = Self.utf16Length(ofPrefix: paragraphString, scalars: lower)
                 let utf16Upper = Self.utf16Length(ofPrefix: paragraphString, scalars: upper)
-                segment.addAttributes(
-                    [
-                        .foregroundColor: Self.annotationColor(note.categoryTitle),
-                        .underlineStyle: NSUnderlineStyle.single.rawValue
-                    ],
-                    range: NSRange(location: utf16Lower, length: utf16Upper - utf16Lower)
+                let localRange = NSRange(
+                    location: utf16Lower,
+                    length: utf16Upper - utf16Lower
                 )
+                // Telegram-like highlight: readable white glyphs over a
+                // translucent orange tint. No underlines or font changes.
+                segment.addAttribute(
+                    .backgroundColor,
+                    value: UIColor(red: 1, green: 0.59, blue: 0.25, alpha: 0.19),
+                    range: localRange
+                )
+                noteHighlights.append(NSRange(
+                    location: start + localRange.location,
+                    length: localRange.length
+                ))
             }
 
             rendered.append(segment)
@@ -128,6 +138,7 @@ final class ChapterPagination {
 
         paragraphs = spans
         paragraphScalarCounts = scalarCounts
+        highlightRanges = noteHighlights
         attributedText = rendered.copy() as! NSAttributedString
         framesetter = CTFramesetterCreateWithAttributedString(attributedText as CFAttributedString)
 
