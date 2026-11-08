@@ -28,6 +28,8 @@ struct ReaderView: View {
     @State private var controlsVisible = true
     @State private var showReaderSettings = false
     @State private var selectedAnnotation: ReaderAnnotation?
+    @State private var selectedText: ReaderTextSelection?
+    @State private var composingSelection: ReaderTextSelection?
 
     private let pageBackground = ReaderTheme.background
 
@@ -64,6 +66,13 @@ struct ReaderView: View {
                 .onChange(of: readingMode) { _, _ in
                     hasRestoredScroll = false
                     hasScrolled = false
+                    selectedText = nil
+                    rebuildPagination(for: geometry.size, force: true)
+                }
+                .onChange(of: store.annotations) { _, _ in
+                    // Updated color spans must be reflected in CoreText.
+                    // Keep the existing paragraph/offset so this doesn't
+                    // move the reader when a new note is saved.
                     rebuildPagination(for: geometry.size, force: true)
                 }
             }
@@ -147,6 +156,19 @@ struct ReaderView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $composingSelection) { selection in
+            AnnotationComposerView(selection: selection) { kind, note in
+                let saved = store.addAnnotation(
+                    for: chapter,
+                    selection: selection,
+                    kind: kind,
+                    note: note
+                )
+                if saved { selectedText = nil }
+                return saved
+            }
+            .presentationDragIndicator(.visible)
+        }
     }
 
     // MARK: - Actual page-based reading
@@ -163,7 +185,25 @@ struct ReaderView: View {
                     if let pagination {
                         CoreTextPage(
                             pagination: pagination,
-                            pageIndex: min(pageIndex, pagination.pageCount - 1)
+                            pageIndex: min(pageIndex, pagination.pageCount - 1),
+                            selection: selectedText,
+                            onTap: { zone in
+                                handlePageTap(zone)
+                            },
+                            onSwipe: { direction in
+                                if selectedText == nil {
+                                    changePage(by: direction)
+                                } else {
+                                    // While selecting, allow looking at the
+                                    // next page without altering reading progress.
+                                    moveSelectionPage(by: direction)
+                                }
+                            },
+                            onSelection: { range, _ in
+                                if let selection = pagination.selection(from: range) {
+                                    selectedText = selection
+                                }
+                            }
                         )
                         .frame(width: max(140, pageWidth), height: max(150, pageHeight))
                         .accessibilityLabel(
@@ -171,28 +211,6 @@ struct ReaderView: View {
                         )
                         .accessibilityAddTraits(.isStaticText)
 
-                        HStack(spacing: 0) {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .frame(width: max(40, pageWidth * 0.19))
-                                .onTapGesture { changePage(by: -1) }
-                                .accessibilityLabel("Предыдущая страница")
-                                .accessibilityAddTraits(.isButton)
-
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture { toggleControls() }
-                                .accessibilityLabel("Показать или скрыть меню")
-                                .accessibilityAddTraits(.isButton)
-
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .frame(width: max(40, pageWidth * 0.19))
-                                .onTapGesture { changePage(by: 1) }
-                                .accessibilityLabel("Следующая страница")
-                                .accessibilityAddTraits(.isButton)
-                        }
-                        .frame(width: max(140, pageWidth), height: max(150, pageHeight))
                     } else {
                         ProgressView("Размечаем страницы…")
                             .tint(ReaderTheme.accent)
@@ -207,6 +225,13 @@ struct ReaderView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottom) {
+                if let selection = selectedText {
+                    selectionActions(selection)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 9)
+                }
+            }
         }
         .background(pageBackground)
     }
@@ -261,6 +286,108 @@ struct ReaderView: View {
             paragraph: location.paragraph,
             offset: location.offset
         )
+    }
+
+    private func handlePageTap(_ zone: ReaderTapZone) {
+        // One tap outside a selection dismisses the contextual commands.
+        if selectedText != nil {
+            selectedText = nil
+            return
+        }
+        switch zone {
+        case .left: changePage(by: -1)
+        case .center: toggleControls()
+        case .right: changePage(by: 1)
+        }
+    }
+
+    private func moveSelectionPage(by delta: Int) {
+        guard let pagination else { return }
+        pageIndex = min(max(0, pageIndex + delta), max(0, pagination.pageCount - 1))
+    }
+
+    private func extendSelection() {
+        guard let pagination, let selected = selectedText else { return }
+        let lastSelectedIndex = max(selected.startUTF16, selected.endUTF16 - 1)
+        guard let lastPage = pagination.chapters.firstIndex(where: { page in
+            lastSelectedIndex >= page.start && lastSelectedIndex < page.start + page.length
+        }), lastPage + 1 < pagination.pageCount else { return }
+
+        let newPage = pagination.chapters[lastPage + 1]
+        let end = newPage.start + newPage.length
+        let range = NSRange(
+            location: selected.startUTF16,
+            length: end - selected.startUTF16
+        )
+        if let extended = pagination.selection(from: range) {
+            selectedText = extended
+            // Show the new segment while leaving the saved reading
+            // position untouched.
+            pageIndex = lastPage + 1
+        }
+    }
+
+    private func selectionActions(_ selection: ReaderTextSelection) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Text(selection.quote)
+                .font(.system(size: 13, design: .serif))
+                .foregroundStyle(ReaderTheme.text)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 11) {
+                Button {
+                    composingSelection = selection
+                } label: {
+                    Label("Заметка", systemImage: "highlighter")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ReaderTheme.background)
+                        .padding(.horizontal, 11)
+                        .frame(height: 34)
+                        .background(ReaderTheme.accent, in: Capsule())
+                }
+
+                Button {
+                    UIPasteboard.general.string = selection.quote
+                    selectedText = nil
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 14))
+                        .foregroundStyle(ReaderTheme.text)
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel("Скопировать выделение")
+
+                Button {
+                    extendSelection()
+                } label: {
+                    Image(systemName: "arrow.right.to.line")
+                        .font(.system(size: 14))
+                        .foregroundStyle(ReaderTheme.text)
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel("Продлить выделение на следующую страницу")
+
+                Spacer(minLength: 0)
+
+                Button {
+                    selectedText = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(ReaderTheme.secondary)
+                        .frame(width: 30, height: 34)
+                }
+                .accessibilityLabel("Отменить выделение")
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(13)
+        .background(ReaderTheme.surfaceHigh.opacity(0.98), in: RoundedRectangle(cornerRadius: 15))
+        .overlay {
+            RoundedRectangle(cornerRadius: 15)
+                .strokeBorder(ReaderTheme.accent.opacity(0.22), lineWidth: 1)
+        }
     }
 
     private func toggleControls() {
