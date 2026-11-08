@@ -6,6 +6,9 @@ struct LibraryView: View {
     @ObservedObject var store: LibraryStore
 
     @State private var isImporterPresented = false
+    @State private var isDocxPickerPresented = false
+    @State private var isReadingDocx = false
+    @State private var pendingDocx: ImportedDocxChapter?
     @State private var isRecordsPresented = false
     @State private var isConfirmationPresented = false
     @State private var isSuccessPresented = false
@@ -67,13 +70,21 @@ struct LibraryView: View {
                     }
                     .accessibilityLabel("Заметки и закладки")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        isDocxPickerPresented = true
+                    } label: {
+                        Image(systemName: "doc.badge.plus")
+                    }
+                    .disabled(isReadingDocx)
+                    .accessibilityLabel("Добавить главу из DOCX")
+
                     Button {
                         isImporterPresented = true
                     } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
-                    .accessibilityLabel("Импортировать резервную копию")
+                    .accessibilityLabel("Импортировать резервную копию ZIP")
                 }
             }
             .toolbarBackground(palette.background, for: .navigationBar)
@@ -114,6 +125,45 @@ struct LibraryView: View {
                     }
                 case .failure(let error):
                     store.statusMessage = error.localizedDescription
+                }
+            }
+            .fileImporter(
+                isPresented: $isDocxPickerPresented,
+                allowedContentTypes: [
+                    UTType(filenameExtension: "docx")
+                        ?? UTType(importedAs: "org.openxmlformats.wordprocessingml.document")
+                ],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first, !isReadingDocx else { return }
+                    isReadingDocx = true
+                    Task {
+                        let accessed = url.startAccessingSecurityScopedResource()
+                        defer {
+                            if accessed { url.stopAccessingSecurityScopedResource() }
+                            isReadingDocx = false
+                        }
+                        do {
+                            let imported = try await Task.detached(
+                                priority: .userInitiated
+                            ) {
+                                try SingleDocxImporter.read(from: url)
+                            }.value
+                            pendingDocx = imported
+                        } catch {
+                            store.statusMessage = error.localizedDescription
+                        }
+                    }
+                case .failure(let error):
+                    store.statusMessage = error.localizedDescription
+                }
+            }
+            .sheet(item: $pendingDocx) { document in
+                DocxChapterImportSheet(store: store, document: document) { chapter in
+                    pendingDocx = nil
+                    store.statusMessage = "Глава «\(chapter.displayTitle)» добавлена в том «\(chapter.volume)»."
                 }
             }
             .confirmationDialog(
@@ -338,6 +388,20 @@ struct LibraryView: View {
             }
             .disabled(isImporting)
             .padding(.top, 5)
+
+            Button {
+                isDocxPickerPresented = true
+            } label: {
+                Label("Добавить главу DOCX", systemImage: "doc.badge.plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palette.accent)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(
+                        palette.surfaceHigh,
+                        in: RoundedRectangle(cornerRadius: 13)
+                    )
+            }
+            .disabled(isReadingDocx)
         }
         .padding(24)
         .frame(maxWidth: .infinity)

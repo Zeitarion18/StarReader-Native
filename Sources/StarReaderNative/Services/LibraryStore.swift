@@ -160,6 +160,108 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    // MARK: - Individual DOCX chapter imports
+
+    /// Add only one document, preserving every existing chapter, note,
+    /// bookmark and reading position in the JSON library.
+    @discardableResult
+    func importDocxChapter(
+        _ document: ImportedDocxChapter,
+        work: String,
+        volume: String,
+        title: String,
+        allowDuplicate: Bool = false
+    ) throws -> LibraryChapter {
+        let fm = FileManager.default
+        let oldLibraryData: Data? = fm.fileExists(atPath: libraryURL.path)
+            ? try Data(contentsOf: libraryURL)
+            : nil
+
+        let chapterID = UUID().uuidString
+        // Generated file names are safe even when the original filename
+        // contains slashes, unusual Unicode, or is identical to another DOCX.
+        let originalFile = "native-" + chapterID + ".docx"
+        let newLibraryData = try ChapterLibraryMutation.append(
+            to: oldLibraryData,
+            series: work,
+            volume: volume,
+            title: title,
+            paragraphs: document.paragraphs.map {
+                ChapterLibraryMutation.Paragraph(
+                    text: $0.text, heading: $0.heading
+                )
+            },
+            chapterID: chapterID,
+            originalFile: originalFile,
+            allowDuplicate: allowDuplicate
+        )
+
+        // Fail before touching any files if JSON content isn't readable by
+        // the actual StarReader model.
+        let parsed = try LibrarySnapshot.parse(newLibraryData)
+        guard let newChapter = parsed.chapters.first(where: { $0.id == chapterID }) else {
+            throw ChapterLibraryMutation.Failure.invalidLibrary
+        }
+
+        let backupDirectory = rootURL
+            .appendingPathComponent("Imports", isDirectory: true)
+            .appendingPathComponent("BeforeDocx-" + chapterID, isDirectory: true)
+        let originalsDirectory = rootURL
+            .appendingPathComponent("originals", isDirectory: true)
+        try fm.createDirectory(
+            at: backupDirectory, withIntermediateDirectories: true
+        )
+        try fm.createDirectory(
+            at: originalsDirectory, withIntermediateDirectories: true
+        )
+
+        // The previous library and state are kept as a local recoverable
+        // snapshot. State never changes during a single-chapter import.
+        if let oldLibraryData {
+            try oldLibraryData.write(
+                to: backupDirectory.appendingPathComponent("qt_library.json"),
+                options: .atomic
+            )
+        }
+        if fm.fileExists(atPath: stateURL.path) {
+            try fm.copyItem(
+                at: stateURL,
+                to: backupDirectory.appendingPathComponent("preview_state.json")
+            )
+        }
+
+        let originalURL = originalsDirectory.appendingPathComponent(originalFile)
+        do {
+            try document.originalData.write(to: originalURL, options: .atomic)
+            try newLibraryData.write(to: libraryURL, options: .atomic)
+        } catch {
+            let saveError = error
+            // Roll back the library JSON if the second write fails. Even if
+            // rollback fails, the pristine backup remains on disk.
+            do {
+                if let oldLibraryData {
+                    try oldLibraryData.write(to: libraryURL, options: .atomic)
+                } else if fm.fileExists(atPath: libraryURL.path) {
+                    try fm.removeItem(at: libraryURL)
+                }
+            } catch {
+                throw NSError(
+                    domain: "StarReader.DocxImport",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Не удалось сохранить DOCX и откатить библиотеку. " +
+                        "Исходная копия есть в папке BeforeDocx. " +
+                        "Перед следующим импортом восстанови библиотеку."]
+                )
+            }
+            try? fm.removeItem(at: originalURL)
+            throw saveError
+        }
+
+        loadFromDisk()
+        return newChapter
+    }
+
     // MARK: - Confirmed library deletion (always backup first)
 
     func deleteChapter(_ chapter: LibraryChapter) throws {

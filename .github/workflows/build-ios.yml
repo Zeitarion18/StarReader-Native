@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.4.8", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "48", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.4.9", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "49", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -134,6 +134,35 @@ jobs:
           assert 'ReaderTheme.' not in reader
           assert '.preferredColorScheme(.dark)' not in app
           print("PASS: five persistent themes, TextKit colors, SwiftUI palette.")
+          PY
+
+      - name: Test safe single-chapter JSON append
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Services/ChapterLibraryMutation.swift \
+            Tests/ChapterLibraryMutationSmoke.swift \
+            -o /tmp/starreader-docx-mutation-tests
+          /tmp/starreader-docx-mutation-tests
+
+      - name: Verify DOCX importer and in-app picker
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          parser = Path("Sources/StarReaderNative/Services/SingleDocxImporter.swift").read_text()
+          sheet = Path("Sources/StarReaderNative/Views/DocxChapterImportSheet.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          assert 'word/document.xml' in parser
+          assert 'shouldResolveExternalEntities = false' in parser
+          assert 'maxDocxBytes' in parser and 'maxXMLBytes' in parser
+          assert 'showDuplicateConfirmation' in sheet
+          assert 'allowDuplicate: true' in sheet
+          assert 'DocxChapterImportSheet(store: store' in library
+          assert 'isDocxPickerPresented' in library
+          assert 'try newLibraryData.write(to: libraryURL, options: .atomic)' in store
+          assert 'oldLibraryData.write(' in store
+          assert 'document.originalData.write' in store
+          print('DOCX picker, duplicate consent, backup, atomic JSON and XML limits present.')
           PY
 
       - name: Package unsigned IPA
