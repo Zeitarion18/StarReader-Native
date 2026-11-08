@@ -76,12 +76,17 @@ struct ReaderView: View {
             informationFooter
         }
         .background(pageBackground.ignoresSafeArea())
-        .navigationTitle(chapter.displayTitle)
+        // Keep the navigation bar in the layout even when its contents fade.
+        // Hiding the bar itself changes GeometryReader height and repaginates.
+        .navigationTitle(controlsVisible ? chapter.displayTitle : "")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 ReaderBackButton()
+                    .opacity(controlsVisible ? 1 : 0)
+                    .allowsHitTesting(controlsVisible)
+                    .accessibilityHidden(!controlsVisible)
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
@@ -96,6 +101,9 @@ struct ReaderView: View {
                         paragraph: currentParagraph
                     ) ? "bookmark.fill" : "bookmark")
                 }
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
+                .accessibilityHidden(!controlsVisible)
                 .accessibilityLabel("Добавить закладку")
 
                 Button {
@@ -103,6 +111,9 @@ struct ReaderView: View {
                 } label: {
                     Image(systemName: "textformat.size")
                 }
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
+                .accessibilityHidden(!controlsVisible)
                 .accessibilityLabel("Оформление чтения")
 
                 NavigationLink {
@@ -110,10 +121,15 @@ struct ReaderView: View {
                 } label: {
                     Image(systemName: "text.book.closed")
                 }
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
+                .accessibilityHidden(!controlsVisible)
                 .accessibilityLabel("Замечания и закладки")
             }
         }
-        .toolbar(controlsVisible ? .visible : .hidden, for: .navigationBar)
+        // Never toggle .hidden for the navigation bar. Its safe-area footprint
+        // is a required invariant of pagination and stays reserved at all times.
+        .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(pageBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .sheet(isPresented: $showReaderSettings) {
