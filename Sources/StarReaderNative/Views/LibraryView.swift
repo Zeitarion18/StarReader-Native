@@ -361,6 +361,7 @@ struct LibraryView: View {
 private struct WorkDetailView: View {
     @ObservedObject var store: LibraryStore
     let work: String
+    @State private var volumeToDelete: LibraryVolume?
 
     var body: some View {
         ScrollView {
@@ -389,32 +390,54 @@ private struct WorkDetailView: View {
                         missingSection("Тома пока не добавлены")
                     } else {
                         ForEach(Array(volumes.enumerated()), id: \.element.id) { index, volume in
-                            NavigationLink(value: volume) {
-                                HStack(spacing: 13) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 13)
-                                            .fill(ReaderTheme.accent.opacity(0.10))
-                                            .frame(width: 49, height: 53)
-                                        Image(systemName: "books.vertical")
-                                            .font(.system(size: 20))
-                                            .foregroundStyle(ReaderTheme.accent)
-                                    }
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(volume.title)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundStyle(ReaderTheme.text)
-                                        Text("\(store.chapters(for: work, volume: volume.title).count) глав")
-                                            .font(.system(size: 12))
+                            HStack(spacing: 8) {
+                                NavigationLink(value: volume) {
+                                    HStack(spacing: 13) {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 13)
+                                                .fill(ReaderTheme.accent.opacity(0.10))
+                                                .frame(width: 49, height: 53)
+                                            Image(systemName: "books.vertical")
+                                                .font(.system(size: 20))
+                                                .foregroundStyle(ReaderTheme.accent)
+                                        }
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(volume.title)
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundStyle(ReaderTheme.text)
+                                            Text("\(store.chapters(for: work, volume: volume.title).count) глав")
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(ReaderTheme.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
                                             .foregroundStyle(ReaderTheme.secondary)
                                     }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(ReaderTheme.secondary)
+                                    .padding(13)
+                                    .background(
+                                        ReaderTheme.surface,
+                                        in: RoundedRectangle(cornerRadius: 17)
+                                    )
                                 }
-                                .padding(13)
-                                .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 17))
+                                .buttonStyle(.plain)
+                                Menu {
+                                    Button(role: .destructive) {
+                                        volumeToDelete = volume
+                                    } label: {
+                                        Label("Удалить том", systemImage: "trash")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(ReaderTheme.secondary)
+                                        .frame(width: 42, height: 53)
+                                        .background(
+                                            ReaderTheme.surface,
+                                            in: RoundedRectangle(cornerRadius: 14)
+                                        )
+                                }
+                                .accessibilityLabel("Действия с томом \(volume.title)")
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -436,6 +459,35 @@ private struct WorkDetailView: View {
         }
         .toolbarBackground(ReaderTheme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .alert(
+            "Удалить том?",
+            isPresented: Binding(
+                get: { volumeToDelete != nil },
+                set: { if !$0 { volumeToDelete = nil } }
+            )
+        ) {
+            Button("Удалить том", role: .destructive) {
+                if let volume = volumeToDelete {
+                    do { try store.deleteVolume(volume) }
+                    catch { store.statusMessage = error.localizedDescription }
+                }
+                volumeToDelete = nil
+            }
+            Button("Отмена", role: .cancel) { volumeToDelete = nil }
+        } message: {
+            Text("«\(volumeToDelete?.title ?? "")» и все главы тома исчезнут из библиотеки вместе со связанными заметками, закладками и прогрессом. Перед удалением StarReader создаст резервную копию.")
+        }
+        .alert(
+            "StarReader",
+            isPresented: Binding(
+                get: { store.statusMessage != nil },
+                set: { if !$0 { store.statusMessage = nil } }
+            )
+        ) {
+            Button("Понятно", role: .cancel) { store.statusMessage = nil }
+        } message: {
+            Text(store.statusMessage ?? "")
+        }
     }
 
     private func missingSection(_ title: String) -> some View {
@@ -451,6 +503,7 @@ private struct WorkDetailView: View {
 private struct VolumeDetailView: View {
     @ObservedObject var store: LibraryStore
     let volume: LibraryVolume
+    @State private var chapterToDelete: LibraryChapter?
 
     private var chapters: [LibraryChapter] {
         store.chapters(for: volume.series, volume: volume.title)
@@ -486,43 +539,65 @@ private struct VolumeDetailView: View {
                             .filter { $0.displayTitle == chapter.displayTitle }.count
                         let duplicates = chapters.filter { $0.displayTitle == chapter.displayTitle }.count
 
-                        NavigationLink(value: chapter) {
-                            HStack(alignment: .center, spacing: 13) {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(ReaderTheme.accent.opacity(0.10))
-                                    .frame(width: 42, height: 48)
-                                    .overlay {
-                                        Text("\(index + 1)")
-                                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                            .foregroundStyle(ReaderTheme.accent)
-                                    }
-
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(chapter.displayTitle)
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(ReaderTheme.text)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    HStack(spacing: 6) {
-                                        if duplicates > 1 {
-                                            Text("Вариант \(duplicateNumber)")
-                                            Text("·")
+                        HStack(spacing: 8) {
+                            NavigationLink(value: chapter) {
+                                HStack(alignment: .center, spacing: 13) {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(ReaderTheme.accent.opacity(0.10))
+                                        .frame(width: 42, height: 48)
+                                        .overlay {
+                                            Text("\(index + 1)")
+                                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(ReaderTheme.accent)
                                         }
-                                        Text("\(chapter.paragraphs.count) абз.")
-                                        Text("·")
-                                        Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(chapter.displayTitle)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(ReaderTheme.text)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: 6) {
+                                            if duplicates > 1 {
+                                                Text("Вариант \(duplicateNumber)")
+                                                Text("·")
+                                            }
+                                            Text("\(chapter.paragraphs.count) абз.")
+                                            Text("·")
+                                            Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
+                                        }
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(ReaderTheme.secondary)
                                     }
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(ReaderTheme.secondary)
+                                    Spacer(minLength: 1)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(ReaderTheme.secondary)
                                 }
-                                Spacer(minLength: 1)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(ReaderTheme.secondary)
+                                .padding(13)
+                                .background(
+                                    ReaderTheme.surface,
+                                    in: RoundedRectangle(cornerRadius: 17)
+                                )
                             }
-                            .padding(13)
-                            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 17))
+                            .buttonStyle(.plain)
+                            Menu {
+                                Button(role: .destructive) {
+                                    chapterToDelete = chapter
+                                } label: {
+                                    Label("Удалить главу", systemImage: "trash")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(ReaderTheme.secondary)
+                                    .frame(width: 42, height: 53)
+                                    .background(
+                                        ReaderTheme.surface,
+                                        in: RoundedRectangle(cornerRadius: 14)
+                                    )
+                            }
+                            .accessibilityLabel("Действия с главой \(chapter.displayTitle)")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -543,5 +618,34 @@ private struct VolumeDetailView: View {
         }
         .toolbarBackground(ReaderTheme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .alert(
+            "Удалить главу?",
+            isPresented: Binding(
+                get: { chapterToDelete != nil },
+                set: { if !$0 { chapterToDelete = nil } }
+            )
+        ) {
+            Button("Удалить главу", role: .destructive) {
+                if let chapter = chapterToDelete {
+                    do { try store.deleteChapter(chapter) }
+                    catch { store.statusMessage = error.localizedDescription }
+                }
+                chapterToDelete = nil
+            }
+            Button("Отмена", role: .cancel) { chapterToDelete = nil }
+        } message: {
+            Text("«\(chapterToDelete?.displayTitle ?? "")» будет удалена из библиотеки вместе с её заметками, закладками и прогрессом. Другие главы с таким же названием останутся. Предварительно сохранится резервная копия.")
+        }
+        .alert(
+            "StarReader",
+            isPresented: Binding(
+                get: { store.statusMessage != nil },
+                set: { if !$0 { store.statusMessage = nil } }
+            )
+        ) {
+            Button("Понятно", role: .cancel) { store.statusMessage = nil }
+        } message: {
+            Text(store.statusMessage ?? "")
+        }
     }
 }

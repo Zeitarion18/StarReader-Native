@@ -160,6 +160,81 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    // MARK: - Confirmed library deletion (always backup first)
+
+    func deleteChapter(_ chapter: LibraryChapter) throws {
+        try delete(.chapter(id: chapter.id))
+    }
+
+    func deleteVolume(_ volume: LibraryVolume) throws {
+        try delete(.volume(series: volume.series, title: volume.title))
+    }
+
+    private func delete(_ target: LibraryDeletion.Target) throws {
+        let fm = FileManager.default
+        let oldLibrary = try Data(contentsOf: libraryURL)
+        let hadState = fm.fileExists(atPath: stateURL.path)
+        let oldState: Data? = hadState ? try Data(contentsOf: stateURL) : nil
+        let currentState: Data = try oldState ?? JSONSerialization.data(
+            withJSONObject: freshState()
+        )
+
+        // Validate and calculate both new JSON documents before touching
+        // live data. If any field is corrupt the deletion is refused.
+        let result = try LibraryDeletion.remove(
+            target,
+            from: oldLibrary,
+            stateData: currentState
+        )
+        _ = try LibrarySnapshot.parse(result.libraryData)
+
+        let backups = rootURL.appendingPathComponent("Deletes", isDirectory: true)
+        let backup = backups.appendingPathComponent(
+            "BeforeDelete-" + UUID().uuidString, isDirectory: true
+        )
+        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
+        // The complete previous JSON (including notes, bookmarks, progress)
+        // is preserved until the user chooses to clear old backups manually.
+        try oldLibrary.write(
+            to: backup.appendingPathComponent("qt_library.json"),
+            options: .atomic
+        )
+        if let oldState {
+            try oldState.write(
+                to: backup.appendingPathComponent("preview_state.json"),
+                options: .atomic
+            )
+        }
+
+        do {
+            try result.libraryData.write(to: libraryURL, options: .atomic)
+            try result.stateData.write(to: stateURL, options: .atomic)
+        } catch {
+            let primaryError = error
+            // A two-file save can fail between writes. Attempt to restore the
+            // exact old pair instead of exposing a mismatched library/state.
+            do {
+                try oldLibrary.write(to: libraryURL, options: .atomic)
+                if let oldState {
+                    try oldState.write(to: stateURL, options: .atomic)
+                } else if fm.fileExists(atPath: stateURL.path) {
+                    try fm.removeItem(at: stateURL)
+                }
+            } catch {
+                throw NSError(
+                    domain: "StarReader.LibraryDelete", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Сохранение не удалось, автоматический откат тоже. " +
+                        "Исходные файлы остались в локальной копии BeforeDelete. " +
+                        "Не импортируй новые данные до восстановления."]
+                )
+            }
+            throw primaryError
+        }
+
+        loadFromDisk()
+    }
+
     func stageImport(from url: URL) async throws {
         let imported = try await Task.detached(priority: .userInitiated) {
             try TransferImporter.read(from: url)

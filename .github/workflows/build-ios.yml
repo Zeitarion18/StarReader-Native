@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.4.6", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "46", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.4.7", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "47", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -105,6 +105,14 @@ jobs:
           assert ".frame(height: 29)" in reader
           print("Native iOS selection, same-engine pagination and stable status footer verified.")
           PY
+
+      - name: Test chapter and volume deletion without data loss
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Services/LibraryDeletion.swift \
+            Tests/LibraryDeletionSmoke.swift \
+            -o /tmp/starreader-library-deletion-tests
+          /tmp/starreader-library-deletion-tests
 
       - name: Package unsigned IPA
         run: |
