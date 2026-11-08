@@ -8,6 +8,7 @@ private struct ParagraphFramesKey: PreferenceKey {
 }
 
 struct ReaderView: View {
+    @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
     let chapter: LibraryChapter
     var jump: ReaderJump? = nil
@@ -16,6 +17,7 @@ struct ReaderView: View {
     @AppStorage("starreader.lineSpacing") private var lineSpacing: Double = 4
     @AppStorage("starreader.paragraphSpacing") private var paragraphSpacing: Double = 13
     @AppStorage("starreader.readingMode") private var readingMode = "pages"
+    @AppStorage("starreader.colorTheme") private var colorThemeID = ReaderColorTheme.dark.rawValue
 
     @State private var pagination: ChapterPagination?
     @State private var nativePlan: NativeTextPagePlan?
@@ -32,7 +34,7 @@ struct ReaderView: View {
     @State private var selectedText: ReaderTextSelection?
     @State private var composingSelection: ReaderTextSelection?
 
-    private let pageBackground = ReaderTheme.background
+    private var pageBackground: Color { palette.background }
 
     private var linkedAnnotations: [ReaderAnnotation] {
         store.annotations(for: chapter.id)
@@ -64,6 +66,10 @@ struct ReaderView: View {
                 .onChange(of: paragraphSpacing) { _, _ in
                     rebuildPagination(for: geometry.size, force: true)
                 }
+                .onChange(of: colorThemeID) { _, _ in
+                    // Restyle all TextKit glyphs without losing the paragraph/offset.
+                    rebuildPagination(for: geometry.size, force: true)
+                }
                 .onChange(of: readingMode) { _, _ in
                     hasRestoredScroll = false
                     hasScrolled = false
@@ -80,7 +86,7 @@ struct ReaderView: View {
 
             // This is an actual, separate footer, NOT an overlay on the text.
             Rectangle()
-                .fill(ReaderTheme.hairline)
+                .fill(palette.hairline)
                 .frame(height: 1)
 
             informationFooter
@@ -147,7 +153,8 @@ struct ReaderView: View {
                 fontSize: $fontSize,
                 lineSpacing: $lineSpacing,
                 paragraphSpacing: $paragraphSpacing,
-                readingMode: $readingMode
+                readingMode: $readingMode,
+                colorThemeID: $colorThemeID
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -185,6 +192,7 @@ struct ReaderView: View {
                 if let plan = nativePlan {
                     NativeSelectablePage(
                         plan: plan,
+                        palette: palette,
                         pageIndex: plan.clamp(pageIndex),
                         onTurn: { direction in
                             changePage(by: direction)
@@ -205,9 +213,9 @@ struct ReaderView: View {
                     )
                 } else {
                     ProgressView("Размечаем страницы…")
-                        .tint(ReaderTheme.accent)
+                        .tint(palette.accent)
                         .font(.system(size: 13))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                         .frame(
                             width: max(140, pageWidth),
                             height: max(150, pageHeight)
@@ -246,7 +254,8 @@ struct ReaderView: View {
             pageHeight: height,
             fontSize: fontSize,
             lineSpacing: lineSpacing,
-            paragraphSpacing: paragraphSpacing
+            paragraphSpacing: paragraphSpacing,
+            palette: palette
         )
         // Use TextKit for both page measurement and on-screen rendering.
         // Native UITextView selection handles use this exact same layout.
@@ -294,7 +303,7 @@ struct ReaderView: View {
                 LazyVStack(alignment: .leading, spacing: paragraphSpacing) {
                     Text(chapter.displayTitle)
                         .font(.system(size: 21, weight: .semibold, design: .serif))
-                        .foregroundStyle(ReaderTheme.text)
+                        .foregroundStyle(palette.text)
                         .padding(.bottom, 13)
                         .padding(.top, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -314,7 +323,7 @@ struct ReaderView: View {
                                 .overlay(alignment: .leading) {
                                     if !notes.isEmpty {
                                         RoundedRectangle(cornerRadius: 2)
-                                            .fill(ReaderTheme.accent)
+                                            .fill(palette.accent)
                                             .frame(width: 3)
                                             .padding(.leading, 2)
                                     }
@@ -396,7 +405,7 @@ struct ReaderView: View {
 
             Text("\(current)/\(total) стр.  •  \(percentText)%  •  \(clock)")
                 .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                .foregroundStyle(ReaderTheme.secondary)
+                .foregroundStyle(palette.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
@@ -435,9 +444,9 @@ struct ReaderView: View {
             guard upper > lower else { continue }
             let content = String(String.UnicodeScalarView(scalars[lower..<upper]))
             var fragment = AttributedString(content)
-            fragment.foregroundColor = ReaderTheme.text.opacity(0.93)
+            fragment.foregroundColor = palette.text.opacity(0.93)
             if ranges.contains(where: { $0.0 <= lower && $0.1 >= upper }) {
-                fragment.backgroundColor = Color.orange.opacity(0.19)
+                fragment.backgroundColor = palette.noteTint
             }
             result.append(fragment)
         }
@@ -457,7 +466,7 @@ struct ReaderView: View {
         case "Сюжет": return .red
         case "Стиль": return .blue
         case "Цитата": return .green
-        default: return ReaderTheme.accent
+        default: return palette.accent
         }
     }
 
@@ -481,7 +490,7 @@ struct ReaderView: View {
                     }
                     Text("Абзац \(item.paragraph + 1)")
                         .font(.system(size: 12))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -495,11 +504,12 @@ struct ReaderView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(palette.colorScheme)
     }
 }
 
 private struct NotePills: View {
+    @Environment(\.readerPalette) private var palette
     let notes: [ReaderAnnotation]
     let onSelect: (ReaderAnnotation) -> Void
 
@@ -512,10 +522,10 @@ private struct NotePills: View {
                     } label: {
                         Label(note.categoryTitle, systemImage: "quote.bubble")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(ReaderTheme.accent)
+                            .foregroundStyle(palette.accent)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 6)
-                            .background(ReaderTheme.surfaceHigh, in: Capsule())
+                            .background(palette.surfaceHigh, in: Capsule())
                     }
                 }
             }
@@ -525,10 +535,12 @@ private struct NotePills: View {
 
 private struct ReaderSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.readerPalette) private var palette
     @Binding var fontSize: Double
     @Binding var lineSpacing: Double
     @Binding var paragraphSpacing: Double
     @Binding var readingMode: String
+    @Binding var colorThemeID: String
 
     var body: some View {
         NavigationStack {
@@ -543,6 +555,66 @@ private struct ReaderSettingsSheet: View {
                     Text("В режиме страниц нажимай по краям экрана для перелистывания, по центру — для меню. Нижняя информационная строка всегда остаётся на месте.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ], spacing: 10) {
+                        ForEach(ReaderColorTheme.allCases) { theme in
+                            Button {
+                                colorThemeID = theme.rawValue
+                            } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Аа")
+                                            .font(.system(size: 22, weight: .medium, design: .serif))
+                                            .foregroundStyle(theme.palette.text)
+                                        Spacer()
+                                        if colorThemeID == theme.rawValue {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(theme.palette.accent)
+                                        }
+                                    }
+                                    Text(theme.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(theme.palette.text)
+                                    Text(theme.subtitle)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(theme.palette.secondary)
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.75)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(height: 95)
+                                .padding(12)
+                                .background(
+                                    theme.palette.background,
+                                    in: RoundedRectangle(cornerRadius: 13)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 13)
+                                        .strokeBorder(
+                                            colorThemeID == theme.rawValue
+                                                ? theme.palette.accent
+                                                : theme.palette.hairline,
+                                            lineWidth: colorThemeID == theme.rawValue ? 2 : 1
+                                        )
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Тема \(theme.title)")
+                            .accessibilityAddTraits(
+                                colorThemeID == theme.rawValue ? [.isSelected] : []
+                            )
+                        }
+                    }
+                    .padding(.vertical, 5)
+                } header: {
+                    Text("Цветовая тема")
+                } footer: {
+                    Text("«Сумерки» — тёмный фон и приглушённый текст для вечернего чтения. Выбор сохраняется автоматически.")
                 }
 
                 Section("Оформление текста") {
@@ -581,10 +653,10 @@ private struct ReaderSettingsSheet: View {
                         lineSpacing = 4
                         paragraphSpacing = 13
                     }
-                    .foregroundStyle(ReaderTheme.accent)
+                    .foregroundStyle(palette.accent)
                 }
             }
-            .tint(ReaderTheme.accent)
+            .tint(palette.accent)
             .navigationTitle("Чтение и оформление")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -593,6 +665,6 @@ private struct ReaderSettingsSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(palette.colorScheme)
     }
 }

@@ -108,6 +108,7 @@ final class NativeTextPagePlan {
 /// magnifier and edit menu; swiping/tapping only turns discrete pages.
 struct NativeSelectablePage: UIViewRepresentable {
     let plan: NativeTextPagePlan
+    let palette: ReaderPalette
     let pageIndex: Int
     let onTurn: (Int) -> Void
     let onTapCenter: () -> Void
@@ -144,8 +145,8 @@ struct NativeSelectablePage: UIViewRepresentable {
         view.showsVerticalScrollIndicator = false
         view.showsHorizontalScrollIndicator = false
         view.bounces = false
-        view.backgroundColor = UIColor(red: 0.035, green: 0.045, blue: 0.075, alpha: 1)
-        view.textColor = UIColor(red: 0.94, green: 0.955, blue: 0.985, alpha: 1)
+        view.backgroundColor = palette.uiBackground
+        view.textColor = palette.uiText
         // This 10pt gutter on BOTH sides is included in plan.pageWidth.
         // The left gutter houses the orange note marker.
         view.textContainerInset = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
@@ -189,6 +190,9 @@ struct NativeSelectablePage: UIViewRepresentable {
         coordinator.onTapCenter = onTapCenter
         coordinator.onMakeNote = onMakeNote
         coordinator.plan = plan
+        view.backgroundColor = palette.uiBackground
+        view.textColor = palette.uiText
+        view.configureNoteColor(palette.uiNoteRail)
 
         let page = plan.clamp(pageIndex)
         coordinator.chapterStart = plan.range(at: page).location
@@ -276,14 +280,18 @@ final class ReaderUITextView: UITextView {
 
     private let railLayer = CAShapeLayer()
     private var highlightedRanges: [NSRange] = []
+    private var noteColor = UIColor(red: 1, green: 0.59, blue: 0.25, alpha: 0.96)
+
+    func configureNoteColor(_ color: UIColor) {
+        noteColor = color
+        railLayer.strokeColor = color.cgColor
+    }
 
     func setNoteRanges(_ ranges: [NSRange]) {
         highlightedRanges = ranges
         if railLayer.superlayer == nil {
             railLayer.fillColor = nil
-            railLayer.strokeColor = UIColor(
-                red: 1, green: 0.59, blue: 0.25, alpha: 0.96
-            ).cgColor
+            railLayer.strokeColor = noteColor.cgColor
             railLayer.lineWidth = 3
             railLayer.lineCap = .round
             layer.addSublayer(railLayer)

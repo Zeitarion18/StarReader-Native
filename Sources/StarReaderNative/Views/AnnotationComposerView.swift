@@ -37,6 +37,7 @@ enum AnnotationCategory: String, CaseIterable, Identifiable {
 }
 
 struct AnnotationComposerView: View {
+    @Environment(\.readerPalette) private var palette
     let selection: ReaderTextSelection
     let onSave: (String, String) -> Bool
 
@@ -60,19 +61,19 @@ struct AnnotationComposerView: View {
                         ScrollView {
                             Text(selection.quote)
                                 .font(.system(size: 15, design: .serif))
-                                .foregroundStyle(ReaderTheme.text)
+                                .foregroundStyle(palette.text)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(maxHeight: 155)
                         .padding(15)
-                        .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 14))
 
                         Text(selection.spansMultipleParagraphs
                              ? "Абзацы \(selection.startParagraph + 1)–\(selection.endParagraph + 1)"
                              : "Абзац \(selection.startParagraph + 1)")
                             .font(.system(size: 12))
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -94,16 +95,16 @@ struct AnnotationComposerView: View {
                                                 .font(.system(size: 11, weight: .bold))
                                         }
                                     }
-                                    .foregroundStyle(category == item ? item.color : ReaderTheme.text)
+                                    .foregroundStyle(category == item ? item.color : palette.text)
                                     .padding(.horizontal, 12)
                                     .frame(height: 49)
                                     .background(
-                                        category == item ? item.color.opacity(0.12) : ReaderTheme.surface,
+                                        category == item ? item.color.opacity(0.12) : palette.surface,
                                         in: RoundedRectangle(cornerRadius: 13)
                                     )
                                     .overlay {
                                         RoundedRectangle(cornerRadius: 13)
-                                            .strokeBorder(category == item ? item.color.opacity(0.55) : ReaderTheme.hairline, lineWidth: 1)
+                                            .strokeBorder(category == item ? item.color.opacity(0.55) : palette.hairline, lineWidth: 1)
                                     }
                                 }
                                 .buttonStyle(.plain)
@@ -118,7 +119,7 @@ struct AnnotationComposerView: View {
                             if comment.isEmpty {
                                 Text("Что хочешь отметить в этом фрагменте?")
                                     .font(.system(size: 14))
-                                    .foregroundStyle(ReaderTheme.secondary.opacity(0.75))
+                                    .foregroundStyle(palette.secondary.opacity(0.75))
                                     .padding(.horizontal, 13)
                                     .padding(.top, 15)
                                     .allowsHitTesting(false)
@@ -126,16 +127,16 @@ struct AnnotationComposerView: View {
 
                             TextEditor(text: $comment)
                                 .font(.system(size: 15))
-                                .foregroundStyle(ReaderTheme.text)
+                                .foregroundStyle(palette.text)
                                 .scrollContentBackground(.hidden)
                                 .padding(7)
                                 .frame(minHeight: 135)
                         }
-                        .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 14))
 
                         Text("Комментарий необязателен. Выделенный текст и категория сохраняются всегда.")
                             .font(.system(size: 12))
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                     }
 
                     Button {
@@ -149,8 +150,8 @@ struct AnnotationComposerView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
-                            .foregroundStyle(ReaderTheme.background)
-                            .background(ReaderTheme.accent, in: RoundedRectangle(cornerRadius: 14))
+                            .foregroundStyle(palette.onAccent)
+                            .background(palette.accent, in: RoundedRectangle(cornerRadius: 14))
                     }
                     .buttonStyle(.plain)
                 }
@@ -160,7 +161,7 @@ struct AnnotationComposerView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollIndicators(.hidden)
-            .background(ReaderTheme.background.ignoresSafeArea())
+            .background(palette.background.ignoresSafeArea())
             .navigationTitle("Новое замечание")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -174,14 +175,14 @@ struct AnnotationComposerView: View {
                 Text("Замечание не было добавлено. Проверь доступное место и повтори попытку.")
             }
         }
-        .tint(ReaderTheme.accent)
-        .preferredColorScheme(.dark)
+        .tint(palette.accent)
+        .preferredColorScheme(palette.colorScheme)
     }
 
     private func sectionCaption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 10, weight: .bold, design: .rounded))
             .tracking(1.6)
-            .foregroundStyle(ReaderTheme.secondary)
+            .foregroundStyle(palette.secondary)
     }
 }

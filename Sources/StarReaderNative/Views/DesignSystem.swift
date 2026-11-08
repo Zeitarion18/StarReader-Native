@@ -1,15 +1,5 @@
 import SwiftUI
 
-enum ReaderTheme {
-    static let background = Color(red: 0.035, green: 0.045, blue: 0.075)
-    static let surface = Color(red: 0.085, green: 0.105, blue: 0.15)
-    static let surfaceHigh = Color(red: 0.11, green: 0.14, blue: 0.20)
-    static let accent = Color(red: 0.36, green: 0.85, blue: 0.91)
-    static let text = Color(red: 0.94, green: 0.96, blue: 1.0)
-    static let secondary = Color(red: 0.59, green: 0.65, blue: 0.76)
-    static let hairline = Color.white.opacity(0.075)
-}
-
 struct BookCover: View {
     let title: String
     var index: Int = 0
@@ -63,6 +53,7 @@ struct BookCover: View {
 }
 
 struct ReaderSurface<Content: View>: View {
+    @Environment(\.readerPalette) private var palette
     let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -72,15 +63,16 @@ struct ReaderSurface<Content: View>: View {
     var body: some View {
         content
             .padding(16)
-            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 19)
-                    .strokeBorder(ReaderTheme.hairline, lineWidth: 1)
+                    .strokeBorder(palette.hairline, lineWidth: 1)
             }
     }
 }
 
 struct ReaderBackButton: View {
+    @Environment(\.readerPalette) private var palette
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -93,7 +85,7 @@ struct ReaderBackButton: View {
                 Text("Назад")
                     .font(.system(size: 14, weight: .medium))
             }
-            .foregroundStyle(ReaderTheme.accent)
+            .foregroundStyle(palette.accent)
         }
         .accessibilityLabel("Назад")
     }

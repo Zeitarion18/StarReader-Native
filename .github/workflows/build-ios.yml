@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.4.7", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "47", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.4.8", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "48", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -113,6 +113,28 @@ jobs:
             Tests/LibraryDeletionSmoke.swift \
             -o /tmp/starreader-library-deletion-tests
           /tmp/starreader-library-deletion-tests
+
+      - name: Verify persisted themes across SwiftUI and TextKit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          theme = Path("Sources/StarReaderNative/Models/ReaderColorTheme.swift").read_text()
+          app = Path("Sources/StarReaderNative/StarReaderNativeApp.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          chapter = Path("Sources/StarReaderNative/Services/ChapterPagination.swift").read_text()
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          for name in ("dark", "twilight", "light", "sepia", "oled"):
+              assert name in theme, name
+          assert '@AppStorage("starreader.colorTheme")' in app
+          assert '.environment(\\.readerPalette, theme.palette)' in app
+          assert 'colorThemeID: $colorThemeID' in reader
+          assert 'palette.uiText' in chapter and 'palette.uiNoteTint' in chapter
+          assert 'view.backgroundColor = palette.uiBackground' in native
+          assert 'view.configureNoteColor(palette.uiNoteRail)' in native
+          assert 'ReaderTheme.' not in reader
+          assert '.preferredColorScheme(.dark)' not in app
+          print("PASS: five persistent themes, TextKit colors, SwiftUI palette.")
+          PY
 
       - name: Package unsigned IPA
         run: |

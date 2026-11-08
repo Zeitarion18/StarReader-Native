@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NotesAndBookmarksView: View {
+    @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
     @State private var activeTab: RecordTab = .notes
     @State private var searchText = ""
@@ -37,10 +38,10 @@ struct NotesAndBookmarksView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Все важные моменты")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(ReaderTheme.text)
+                        .foregroundStyle(palette.text)
                     Text("\(store.annotations.count) замечаний · \(store.bookmarks.count) закладок")
                         .font(.system(size: 13))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
 
                 Picker("Раздел", selection: $activeTab) {
@@ -53,24 +54,24 @@ struct NotesAndBookmarksView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                     TextField("Поиск по записям", text: $searchText)
                         .font(.system(size: 14))
-                        .tint(ReaderTheme.accent)
+                        .tint(palette.accent)
                         .autocorrectionDisabled()
                     if !searchText.isEmpty {
                         Button {
                             searchText = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(ReaderTheme.secondary)
+                                .foregroundStyle(palette.secondary)
                         }
                         .accessibilityLabel("Очистить поиск")
                     }
                 }
                 .padding(.horizontal, 14)
                 .frame(height: 44)
-                .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 13))
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 13))
 
                 if store.unlinkedAnnotationCount > 0 || store.unlinkedBookmarkCount > 0 {
                     HStack(alignment: .top, spacing: 10) {
@@ -144,7 +145,7 @@ struct NotesAndBookmarksView: View {
             .padding(.bottom, 38)
         }
         .scrollIndicators(.hidden)
-        .background(ReaderTheme.background.ignoresSafeArea())
+        .background(palette.background.ignoresSafeArea())
         .navigationTitle("Мои записи")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden()
@@ -160,7 +161,7 @@ struct NotesAndBookmarksView: View {
                 ContentUnavailableView("Глава отсутствует", systemImage: "archivebox")
             }
         }
-        .toolbarBackground(ReaderTheme.background, for: .navigationBar)
+        .toolbarBackground(palette.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
     }
 
@@ -183,13 +184,13 @@ struct NotesAndBookmarksView: View {
                     } else {
                         Image(systemName: "arrow.up.right")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                     }
                 }
 
                 Text(chapter?.displayTitle ?? "Глава отсутствует в библиотеке")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ReaderTheme.text)
+                    .foregroundStyle(palette.text)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
 
@@ -200,7 +201,7 @@ struct NotesAndBookmarksView: View {
                             .frame(width: 3)
                         Text(item.quote)
                             .font(.system(size: 14, design: .serif))
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                             .lineLimit(3)
                             .multilineTextAlignment(.leading)
                     }
@@ -210,14 +211,14 @@ struct NotesAndBookmarksView: View {
                 if !item.note.isEmpty {
                     Text(item.note)
                         .font(.system(size: 13))
-                        .foregroundStyle(ReaderTheme.text.opacity(0.88))
+                        .foregroundStyle(palette.text.opacity(0.88))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
 
                 Text("Абзац \(item.paragraph + 1)")
                     .font(.system(size: 11))
-                    .foregroundStyle(ReaderTheme.secondary.opacity(0.8))
+                    .foregroundStyle(palette.secondary.opacity(0.8))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -227,41 +228,41 @@ struct NotesAndBookmarksView: View {
         ReaderSurface {
             HStack(alignment: .top, spacing: 13) {
                 Image(systemName: "bookmark.fill")
-                    .foregroundStyle(ReaderTheme.accent)
+                    .foregroundStyle(palette.accent)
                     .font(.system(size: 18))
                     .frame(width: 27)
 
                 VStack(alignment: .leading, spacing: 7) {
                     Text(item.title)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(ReaderTheme.text)
+                        .foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(chapter?.displayTitle ?? "Глава отсутствует в библиотеке")
                         .font(.system(size: 12))
-                        .foregroundStyle(chapter == nil ? .orange : ReaderTheme.secondary)
+                        .foregroundStyle(chapter == nil ? .orange : palette.secondary)
                         .lineLimit(2)
                     if !item.quote.isEmpty {
                         Text(item.quote)
                             .font(.system(size: 13, design: .serif))
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                             .lineLimit(2)
                     }
                     if !item.note.isEmpty {
                         Text(item.note)
                             .font(.system(size: 12))
-                            .foregroundStyle(ReaderTheme.text)
+                            .foregroundStyle(palette.text)
                             .lineLimit(2)
                     }
                     Text("Абзац \(item.paragraph + 1)")
                         .font(.system(size: 11))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
 
                 Spacer(minLength: 0)
                 if chapter != nil {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
             }
         }
@@ -271,14 +272,14 @@ struct NotesAndBookmarksView: View {
         VStack(spacing: 10) {
             Image(systemName: "text.book.closed")
                 .font(.system(size: 28, weight: .ultraLight))
-                .foregroundStyle(ReaderTheme.secondary)
+                .foregroundStyle(palette.secondary)
             Text(message)
                 .font(.system(size: 14))
-                .foregroundStyle(ReaderTheme.secondary)
+                .foregroundStyle(palette.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(38)
-        .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func categoryColor(_ category: String) -> Color {
@@ -287,7 +288,7 @@ struct NotesAndBookmarksView: View {
         case "Сюжет": return .red
         case "Стиль": return .blue
         case "Цитата": return .green
-        default: return ReaderTheme.accent
+        default: return palette.accent
         }
     }
 }

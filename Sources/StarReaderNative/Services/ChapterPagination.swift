@@ -40,7 +40,8 @@ final class ChapterPagination {
         pageHeight: CGFloat,
         fontSize: Double,
         lineSpacing: Double,
-        paragraphSpacing: Double
+        paragraphSpacing: Double,
+        palette: ReaderPalette
     ) {
         self.pageWidth = max(140, pageWidth)
         self.pageHeight = max(150, pageHeight)
@@ -60,7 +61,7 @@ final class ChapterPagination {
         titleStyle.lineSpacing = 5
         titleStyle.paragraphSpacing = 21
 
-        let foreground = UIColor(red: 0.94, green: 0.955, blue: 0.985, alpha: 0.96)
+        let foreground = palette.uiText
         let heading: [NSAttributedString.Key: Any] = [
             .font: headingFont,
             .paragraphStyle: titleStyle,
@@ -117,7 +118,7 @@ final class ChapterPagination {
                 // translucent orange tint. No underlines or font changes.
                 segment.addAttribute(
                     .backgroundColor,
-                    value: UIColor(red: 1, green: 0.59, blue: 0.25, alpha: 0.19),
+                    value: palette.uiNoteTint,
                     range: localRange
                 )
                 noteHighlights.append(NSRange(

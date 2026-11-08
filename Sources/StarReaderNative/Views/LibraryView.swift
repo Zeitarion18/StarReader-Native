@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
+    @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
 
     @State private var isImporterPresented = false
@@ -32,7 +33,7 @@ struct LibraryView: View {
                         Text("Только на твоём iPhone · Без подписки")
                     }
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ReaderTheme.secondary.opacity(0.8))
+                    .foregroundStyle(palette.secondary.opacity(0.8))
                     .frame(maxWidth: .infinity)
                     .padding(.top, 4)
                 }
@@ -44,10 +45,10 @@ struct LibraryView: View {
             }
             .scrollIndicators(.hidden)
             .background {
-                ReaderTheme.background
+                palette.background
                     .overlay(alignment: .top) {
                         LinearGradient(
-                            colors: [ReaderTheme.accent.opacity(0.065), .clear],
+                            colors: [palette.accent.opacity(0.065), .clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -75,7 +76,7 @@ struct LibraryView: View {
                     .accessibilityLabel("Импортировать резервную копию")
                 }
             }
-            .toolbarBackground(ReaderTheme.background, for: .navigationBar)
+            .toolbarBackground(palette.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationDestination(for: String.self) { work in
                 WorkDetailView(store: store, work: work)
@@ -152,8 +153,8 @@ struct LibraryView: View {
                 Text(store.statusMessage ?? "")
             }
         }
-        .tint(ReaderTheme.accent)
-        .preferredColorScheme(.dark)
+        .tint(palette.accent)
+        .preferredColorScheme(palette.colorScheme)
     }
 
     private var introduction: some View {
@@ -161,15 +162,15 @@ struct LibraryView: View {
             Text("ЛИЧНАЯ КОЛЛЕКЦИЯ")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(2.4)
-                .foregroundStyle(ReaderTheme.accent)
+                .foregroundStyle(palette.accent)
 
             Text("Библиотека")
                 .font(.system(size: 31, weight: .bold, design: .rounded))
-                .foregroundStyle(ReaderTheme.text)
+                .foregroundStyle(palette.text)
 
             Text("\(store.snapshot.works.count) произведений · \(store.snapshot.chapters.count) глав")
                 .font(.system(size: 13))
-                .foregroundStyle(ReaderTheme.secondary)
+                .foregroundStyle(palette.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -188,12 +189,12 @@ struct LibraryView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(chapter.series)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                             .lineLimit(2)
 
                         Text(chapter.displayTitle)
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(ReaderTheme.text)
+                            .foregroundStyle(palette.text)
                             .lineLimit(3)
                             .multilineTextAlignment(.leading)
 
@@ -202,14 +203,14 @@ struct LibraryView: View {
                         HStack {
                             Text("Продолжить")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(ReaderTheme.accent)
+                                .foregroundStyle(palette.accent)
                             Image(systemName: "arrow.up.right")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(ReaderTheme.accent)
+                                .foregroundStyle(palette.accent)
                             Spacer()
                             Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundStyle(ReaderTheme.text)
+                                .foregroundStyle(palette.text)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -217,17 +218,17 @@ struct LibraryView: View {
 
                 }
                 .padding(15)
-                .background(ReaderTheme.surfaceHigh, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                .background(palette.surfaceHigh, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 19)
-                        .strokeBorder(ReaderTheme.accent.opacity(0.19), lineWidth: 1)
+                        .strokeBorder(palette.accent.opacity(0.19), lineWidth: 1)
                 }
                 .overlay(alignment: .bottom) {
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.white.opacity(0.08))
                             Capsule()
-                                .fill(ReaderTheme.accent)
+                                .fill(palette.accent)
                                 .frame(
                                     width: geometry.size.width * CGFloat(
                                         min(max(store.progress(for: chapter.id).percent, 0), 100) / 100
@@ -256,26 +257,26 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 9) {
                             Text(work)
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(ReaderTheme.text)
+                                .foregroundStyle(palette.text)
                                 .lineLimit(3)
                                 .multilineTextAlignment(.leading)
 
                             let chapters = store.snapshot.chapters.filter { $0.series == work }.count
                             Text("\(store.volumes(for: work).count) томов · \(chapters) глав")
                                 .font(.system(size: 12))
-                                .foregroundStyle(ReaderTheme.secondary)
+                                .foregroundStyle(palette.secondary)
                         }
                         Spacer(minLength: 2)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(ReaderTheme.secondary.opacity(0.7))
+                            .foregroundStyle(palette.secondary.opacity(0.7))
                     }
                     .padding(13)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18)
-                            .strokeBorder(ReaderTheme.hairline, lineWidth: 1)
+                            .strokeBorder(palette.hairline, lineWidth: 1)
                     }
                 }
                 .buttonStyle(.plain)
@@ -290,23 +291,23 @@ struct LibraryView: View {
             HStack(spacing: 12) {
                 Image(systemName: "bookmark.square")
                     .font(.system(size: 20))
-                    .foregroundStyle(ReaderTheme.accent)
+                    .foregroundStyle(palette.accent)
                     .frame(width: 32, height: 32)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Заметки и закладки")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(ReaderTheme.text)
+                        .foregroundStyle(palette.text)
                     Text("\(store.annotations.count) замечаний · \(store.bookmarks.count) закладок")
                         .font(.system(size: 12))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ReaderTheme.secondary)
+                    .foregroundStyle(palette.secondary)
             }
             .padding(16)
-            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -315,15 +316,15 @@ struct LibraryView: View {
         VStack(spacing: 16) {
             Image(systemName: "books.vertical")
                 .font(.system(size: 42, weight: .ultraLight))
-                .foregroundStyle(ReaderTheme.accent)
+                .foregroundStyle(palette.accent)
                 .frame(height: 58)
             Text("Твои истории начнутся здесь")
                 .font(.system(size: 19, weight: .semibold, design: .rounded))
-                .foregroundStyle(ReaderTheme.text)
+                .foregroundStyle(palette.text)
                 .multilineTextAlignment(.center)
             Text("Перенеси библиотеку из резервного ZIP. Тексты, позиции чтения и заметки останутся с тобой.")
                 .font(.system(size: 13))
-                .foregroundStyle(ReaderTheme.secondary)
+                .foregroundStyle(palette.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
@@ -331,34 +332,35 @@ struct LibraryView: View {
             } label: {
                 Label(isImporting ? "Проверяем ZIP…" : "Импортировать ZIP", systemImage: "square.and.arrow.down")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ReaderTheme.background)
+                    .foregroundStyle(palette.onAccent)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(ReaderTheme.accent, in: RoundedRectangle(cornerRadius: 13))
+                    .background(palette.accent, in: RoundedRectangle(cornerRadius: 13))
             }
             .disabled(isImporting)
             .padding(.top, 5)
         }
         .padding(24)
         .frame(maxWidth: .infinity)
-        .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 21))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 21))
     }
 
     private func sectionHeading(_ title: String, count: Int?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(title)
                 .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(ReaderTheme.text)
+                .foregroundStyle(palette.text)
             Spacer(minLength: 6)
             if let count {
                 Text("\(count)")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ReaderTheme.secondary)
+                    .foregroundStyle(palette.secondary)
             }
         }
     }
 }
 
 private struct WorkDetailView: View {
+    @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
     let work: String
     @State private var volumeToDelete: LibraryVolume?
@@ -372,10 +374,10 @@ private struct WorkDetailView: View {
                         Text("ПРОИЗВЕДЕНИЕ")
                             .font(.system(size: 10, weight: .bold))
                             .tracking(1.5)
-                            .foregroundStyle(ReaderTheme.accent)
+                            .foregroundStyle(palette.accent)
                         Text(work)
                             .font(.system(size: 20, weight: .bold, design: .serif))
-                            .foregroundStyle(ReaderTheme.text)
+                            .foregroundStyle(palette.text)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -383,7 +385,7 @@ private struct WorkDetailView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Тома")
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(ReaderTheme.text)
+                        .foregroundStyle(palette.text)
 
                     let volumes = store.volumes(for: work)
                     if volumes.isEmpty {
@@ -395,27 +397,27 @@ private struct WorkDetailView: View {
                                     HStack(spacing: 13) {
                                         ZStack {
                                             RoundedRectangle(cornerRadius: 13)
-                                                .fill(ReaderTheme.accent.opacity(0.10))
+                                                .fill(palette.accent.opacity(0.10))
                                                 .frame(width: 49, height: 53)
                                             Image(systemName: "books.vertical")
                                                 .font(.system(size: 20))
-                                                .foregroundStyle(ReaderTheme.accent)
+                                                .foregroundStyle(palette.accent)
                                         }
                                         VStack(alignment: .leading, spacing: 5) {
                                             Text(volume.title)
                                                 .font(.system(size: 16, weight: .semibold))
-                                                .foregroundStyle(ReaderTheme.text)
+                                                .foregroundStyle(palette.text)
                                             Text("\(store.chapters(for: work, volume: volume.title).count) глав")
                                                 .font(.system(size: 12))
-                                                .foregroundStyle(ReaderTheme.secondary)
+                                                .foregroundStyle(palette.secondary)
                                         }
                                         Spacer()
                                         Image(systemName: "chevron.right")
-                                            .foregroundStyle(ReaderTheme.secondary)
+                                            .foregroundStyle(palette.secondary)
                                     }
                                     .padding(13)
                                     .background(
-                                        ReaderTheme.surface,
+                                        palette.surface,
                                         in: RoundedRectangle(cornerRadius: 17)
                                     )
                                 }
@@ -429,10 +431,10 @@ private struct WorkDetailView: View {
                                 } label: {
                                     Image(systemName: "ellipsis")
                                         .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(ReaderTheme.secondary)
+                                        .foregroundStyle(palette.secondary)
                                         .frame(width: 42, height: 53)
                                         .background(
-                                            ReaderTheme.surface,
+                                            palette.surface,
                                             in: RoundedRectangle(cornerRadius: 14)
                                         )
                                 }
@@ -448,7 +450,7 @@ private struct WorkDetailView: View {
             .padding(.bottom, 20)
         }
         .scrollIndicators(.hidden)
-        .background(ReaderTheme.background.ignoresSafeArea())
+        .background(palette.background.ignoresSafeArea())
         .navigationTitle("Произведение")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden()
@@ -457,7 +459,7 @@ private struct WorkDetailView: View {
                 ReaderBackButton()
             }
         }
-        .toolbarBackground(ReaderTheme.background, for: .navigationBar)
+        .toolbarBackground(palette.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .alert(
             "Удалить том?",
@@ -493,14 +495,15 @@ private struct WorkDetailView: View {
     private func missingSection(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 14))
-            .foregroundStyle(ReaderTheme.secondary)
+            .foregroundStyle(palette.secondary)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(30)
-            .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 18))
     }
 }
 
 private struct VolumeDetailView: View {
+    @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
     let volume: LibraryVolume
     @State private var chapterToDelete: LibraryChapter?
@@ -515,21 +518,21 @@ private struct VolumeDetailView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(volume.series)
                         .font(.system(size: 12))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                         .lineLimit(2)
                     Text(volume.title)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundStyle(ReaderTheme.text)
+                        .foregroundStyle(palette.text)
                     Text("\(chapters.count) глав")
                         .font(.system(size: 13))
-                        .foregroundStyle(ReaderTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if chapters.isEmpty {
                     ReaderSurface {
                         Text("Здесь пока нет глав.")
-                            .foregroundStyle(ReaderTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
                     }
@@ -543,18 +546,18 @@ private struct VolumeDetailView: View {
                             NavigationLink(value: chapter) {
                                 HStack(alignment: .center, spacing: 13) {
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(ReaderTheme.accent.opacity(0.10))
+                                        .fill(palette.accent.opacity(0.10))
                                         .frame(width: 42, height: 48)
                                         .overlay {
                                             Text("\(index + 1)")
                                                 .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                                .foregroundStyle(ReaderTheme.accent)
+                                                .foregroundStyle(palette.accent)
                                         }
 
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(chapter.displayTitle)
                                             .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(ReaderTheme.text)
+                                            .foregroundStyle(palette.text)
                                             .fixedSize(horizontal: false, vertical: true)
                                         HStack(spacing: 6) {
                                             if duplicates > 1 {
@@ -566,16 +569,16 @@ private struct VolumeDetailView: View {
                                             Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
                                         }
                                         .font(.system(size: 12))
-                                        .foregroundStyle(ReaderTheme.secondary)
+                                        .foregroundStyle(palette.secondary)
                                     }
                                     Spacer(minLength: 1)
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(ReaderTheme.secondary)
+                                        .foregroundStyle(palette.secondary)
                                 }
                                 .padding(13)
                                 .background(
-                                    ReaderTheme.surface,
+                                    palette.surface,
                                     in: RoundedRectangle(cornerRadius: 17)
                                 )
                             }
@@ -589,10 +592,10 @@ private struct VolumeDetailView: View {
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(ReaderTheme.secondary)
+                                    .foregroundStyle(palette.secondary)
                                     .frame(width: 42, height: 53)
                                     .background(
-                                        ReaderTheme.surface,
+                                        palette.surface,
                                         in: RoundedRectangle(cornerRadius: 14)
                                     )
                             }
@@ -607,7 +610,7 @@ private struct VolumeDetailView: View {
             .padding(.bottom, 20)
         }
         .scrollIndicators(.hidden)
-        .background(ReaderTheme.background.ignoresSafeArea())
+        .background(palette.background.ignoresSafeArea())
         .navigationTitle(volume.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden()
@@ -616,7 +619,7 @@ private struct VolumeDetailView: View {
                 ReaderBackButton()
             }
         }
-        .toolbarBackground(ReaderTheme.background, for: .navigationBar)
+        .toolbarBackground(palette.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .alert(
             "Удалить главу?",
