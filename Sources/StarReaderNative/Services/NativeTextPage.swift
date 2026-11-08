@@ -38,7 +38,10 @@ final class NativeTextPagePlan {
 
         // Leave a small tolerance for glyph ascenders/descenders at the
         // viewport edge. No line will ever be cut in two by a page boundary.
-        let usableHeight = max(80, self.pageHeight - 8)
+        // Rendering a page-local attributed slice can slightly change the
+        // first line's paragraph geometry. Keep a full line of slack so an
+        // actual UITextView never clips the page's last glyph.
+        let usableHeight = max(80, self.pageHeight - 34)
         manager.enumerateLineFragments(forGlyphRange: glyphRange) {
             rect, _, _, glyphs, _ in
             if rect.maxY > lastStartY + usableHeight &&
@@ -101,7 +104,7 @@ final class NativeTextPagePlan {
     }
 }
 
-/// A self-contained, non-scrolling page. UIKit still owns its selection,
+/// A self-contained, discrete page. UIKit still owns its selection,
 /// magnifier and edit menu; swiping/tapping only turns discrete pages.
 struct NativeSelectablePage: UIViewRepresentable {
     let plan: NativeTextPagePlan
@@ -115,7 +118,9 @@ struct NativeSelectablePage: UIViewRepresentable {
     func makeUIView(context: Context) -> ReaderUITextView {
         let storage = NSTextStorage()
         let manager = NSLayoutManager()
-        let container = NSTextContainer(size: .zero)
+        let container = NSTextContainer(
+            size: CGSize(width: plan.pageWidth, height: CGFloat.greatestFiniteMagnitude)
+        )
         container.lineFragmentPadding = 0
         container.widthTracksTextView = true
         container.heightTracksTextView = false
@@ -125,9 +130,17 @@ struct NativeSelectablePage: UIViewRepresentable {
         let view = ReaderUITextView(frame: .zero, textContainer: container)
         view.isEditable = false
         view.isSelectable = true
-        // Disabling UITextView scrolling prevents previous-page ghost lines
-        // and prevents UIKit from clamping/repositioning a page offset.
-        view.isScrollEnabled = false
+        // UIKit must lay out a scrolling UITextView to keep word wrapping
+        // correct. v0.4.5 disabled scrolling, and UIKit widened the text
+        // container to its intrinsic content size (the screenshot showed
+        // horizontally clipped text and most of the page blank).
+        //
+        // Enable the native text layout, but disable its pan recognizer: only
+        // our discrete page-turn gestures are allowed to move between pages.
+        view.isScrollEnabled = true
+        view.panGestureRecognizer.isEnabled = false
+        view.alwaysBounceVertical = false
+        view.alwaysBounceHorizontal = false
         view.showsVerticalScrollIndicator = false
         view.showsHorizontalScrollIndicator = false
         view.bounces = false
@@ -137,6 +150,7 @@ struct NativeSelectablePage: UIViewRepresentable {
         // The left gutter houses the orange note marker.
         view.textContainerInset = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
         view.contentInset = .zero
+        view.scrollIndicatorInsets = .zero
         view.contentInsetAdjustmentBehavior = .never
         view.keyboardDismissMode = .none
         view.dataDetectorTypes = []
@@ -186,6 +200,7 @@ struct NativeSelectablePage: UIViewRepresentable {
             view.currentPlan = plan
             view.currentPage = page
             view.selectedRange = NSRange(location: 0, length: 0)
+            view.setContentOffset(.zero, animated: false)
             view.setNoteRanges(plan.noteRanges(at: page))
         }
     }
@@ -278,6 +293,23 @@ final class ReaderUITextView: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+
+        // The text container is always the *visible* page width, never the
+        // intrinsic width of a long paragraph. Guard against zero-width
+        // initial layout and UIKit geometry changes after SwiftUI sizing.
+        let width = bounds.width - textContainerInset.left - textContainerInset.right
+        if width >= 140 && abs(textContainer.size.width - width) > 0.5 {
+            textContainer.size = CGSize(
+                width: width,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        }
+
+        // This UITextView stores ONLY one page; its scroll position must
+        // always be zero. The user changes pages through onTurn instead.
+        if abs(contentOffset.x) > 0.5 || abs(contentOffset.y) > 0.5 {
+            setContentOffset(.zero, animated: false)
+        }
         refreshRails()
     }
 

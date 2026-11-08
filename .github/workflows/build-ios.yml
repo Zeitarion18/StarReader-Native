@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.4.5", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "45", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.4.6", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "46", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -94,9 +94,11 @@ jobs:
           assert "editMenuForTextIn range: NSRange" in native
           assert "NativeSelectablePage(" in reader
           assert "CoreTextPage(" not in reader
-          assert "isScrollEnabled = false" in native, "Each page must be an isolated non-scrolling UITextView"
+          assert "isScrollEnabled = true" in native, "UITextView needs scroll-enabled layout for word wrapping"
+          assert "panGestureRecognizer.isEnabled = false" in native, "Disable free vertical dragging"
+          assert "abs(textContainer.size.width - width)" in native, "Constrain TextKit to the visible page width"
+          assert "setContentOffset(.zero, animated: false)" in native, "Always display each page from its own top"
           assert "attributedSubstring(from: range(at: page))" in native, "Pages must use disjoint UTF-16 slices"
-          assert "setContentOffset" not in native, "Do not scroll the full chapter under a page viewport"
           assert "chapterStart + range.location" in native, "Selections must use chapter-global offsets"
           assert "highlightRanges" in native and "setNoteRanges" in native, "Preserve visible annotation rails"
           assert ".toolbar(.visible, for: .navigationBar)" in reader
