@@ -102,6 +102,64 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    /// Adds a note without rewriting or deleting any existing imported records.
+    /// This matches the StarReader Qt Transfer shape: para/start/end/endPara
+    /// use Unicode-scalar offsets, not the global UTF-16 positions of CoreText.
+    @discardableResult
+    func addAnnotation(
+        for chapter: LibraryChapter,
+        selection: ReaderTextSelection,
+        kind: String,
+        note: String
+    ) -> Bool {
+        let validKinds: Set<String> = ["canon", "plot", "style", "favorite"]
+        guard validKinds.contains(kind),
+              !selection.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              chapter.paragraphs.indices.contains(selection.startParagraph),
+              chapter.paragraphs.indices.contains(selection.endParagraph),
+              selection.startParagraph <= selection.endParagraph,
+              selection.startOffset >= 0,
+              selection.endOffset >= 0,
+              selection.startOffset <= chapter.paragraphs[selection.startParagraph].text.unicodeScalars.count,
+              selection.endOffset <= chapter.paragraphs[selection.endParagraph].text.unicodeScalars.count,
+              (selection.startParagraph < selection.endParagraph ||
+               selection.startOffset < selection.endOffset) else {
+            statusMessage = "Выделение неверно. Выдели текст заново и повтори."
+            return false
+        }
+
+        let item: [String: Any] = [
+            "id": UUID().uuidString,
+            "bookId": chapter.id,
+            "para": selection.startParagraph,
+            "start": selection.startOffset,
+            "endPara": selection.endParagraph,
+            "end": selection.endOffset,
+            "kind": kind,
+            "quote": selection.quote,
+            "note": note,
+            "status": "open",
+            "createdAt": ISO8601DateFormatter().string(from: Date())
+        ]
+
+        let previous = stateObject["annotations"]
+        var entries = stateObject["annotations"] as? [[String: Any]] ?? []
+        entries.append(item)
+        stateObject["annotations"] = entries
+
+        do {
+            try saveState()
+            loadRecordCollections()
+            return true
+        } catch {
+            // A failed write must not leave an in-memory item that cannot
+            // survive a restart.
+            stateObject["annotations"] = previous
+            statusMessage = "Не удалось сохранить замечание: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func stageImport(from url: URL) async throws {
         let imported = try await Task.detached(priority: .userInitiated) {
             try TransferImporter.read(from: url)
