@@ -15,10 +15,16 @@ struct ReaderView: View {
     @AppStorage("starreader.fontSize") private var fontSize: Double = 17
     @AppStorage("starreader.lineSpacing") private var lineSpacing: Double = 4
     @AppStorage("starreader.paragraphSpacing") private var paragraphSpacing: Double = 13
+    @AppStorage("starreader.readingMode") private var readingMode = "pages"
 
+    @State private var pagination: ChapterPagination?
+    @State private var pageIndex = 0
     @State private var currentParagraph = 0
-    @State private var didRestorePosition = false
+    @State private var currentOffset = 0
+    @State private var lastPageSize = CGSize.zero
+    @State private var hasRestored = false
     @State private var hasScrolled = false
+    @State private var hasRestoredScroll = false
     @State private var controlsVisible = true
     @State private var showReaderSettings = false
     @State private var selectedAnnotation: ReaderAnnotation?
@@ -30,6 +36,226 @@ struct ReaderView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            GeometryReader { geometry in
+                Group {
+                    if readingMode == "pages" {
+                        pageReader(in: geometry.size)
+                    } else {
+                        scrollingReader
+                    }
+                }
+                .background(pageBackground)
+                .onAppear {
+                    rebuildPagination(for: geometry.size)
+                }
+                .onChange(of: geometry.size) { _, newValue in
+                    rebuildPagination(for: newValue)
+                }
+                .onChange(of: fontSize) { _, _ in
+                    rebuildPagination(for: geometry.size, force: true)
+                }
+                .onChange(of: lineSpacing) { _, _ in
+                    rebuildPagination(for: geometry.size, force: true)
+                }
+                .onChange(of: paragraphSpacing) { _, _ in
+                    rebuildPagination(for: geometry.size, force: true)
+                }
+                .onChange(of: readingMode) { _, _ in
+                    hasRestoredScroll = false
+                    hasScrolled = false
+                    rebuildPagination(for: geometry.size, force: true)
+                }
+            }
+
+            // This is an actual, separate footer, NOT an overlay on the text.
+            Rectangle()
+                .fill(ReaderTheme.hairline)
+                .frame(height: 1)
+
+            informationFooter
+        }
+        .background(pageBackground.ignoresSafeArea())
+        .navigationTitle(chapter.displayTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                ReaderBackButton()
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    store.addBookmark(
+                        for: chapter,
+                        paragraph: currentParagraph,
+                        offset: currentOffset
+                    )
+                } label: {
+                    Image(systemName: store.hasBookmark(
+                        chapterID: chapter.id,
+                        paragraph: currentParagraph
+                    ) ? "bookmark.fill" : "bookmark")
+                }
+                .accessibilityLabel("Добавить закладку")
+
+                Button {
+                    showReaderSettings = true
+                } label: {
+                    Image(systemName: "textformat.size")
+                }
+                .accessibilityLabel("Оформление чтения")
+
+                NavigationLink {
+                    NotesAndBookmarksView(store: store)
+                } label: {
+                    Image(systemName: "text.book.closed")
+                }
+                .accessibilityLabel("Замечания и закладки")
+            }
+        }
+        .toolbar(controlsVisible ? .visible : .hidden, for: .navigationBar)
+        .toolbarBackground(pageBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .sheet(isPresented: $showReaderSettings) {
+            ReaderSettingsSheet(
+                fontSize: $fontSize,
+                lineSpacing: $lineSpacing,
+                paragraphSpacing: $paragraphSpacing,
+                readingMode: $readingMode
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedAnnotation) { item in
+            annotationSheet(item)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    // MARK: - Actual page-based reading
+
+    private func pageReader(in size: CGSize) -> some View {
+        GeometryReader { geometry in
+            let pageWidth = min(geometry.size.width - 36, 700)
+            let pageHeight = geometry.size.height - 20
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+
+                ZStack {
+                    if let pagination {
+                        CoreTextPage(
+                            pagination: pagination,
+                            pageIndex: min(pageIndex, pagination.pageCount - 1)
+                        )
+                        .frame(width: max(140, pageWidth), height: max(150, pageHeight))
+                        .accessibilityLabel(
+                            "Страница \(pageIndex + 1) из \(pagination.pageCount)"
+                        )
+                        .accessibilityAddTraits(.isStaticText)
+
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .frame(width: max(40, pageWidth * 0.19))
+                                .onTapGesture { changePage(by: -1) }
+                                .accessibilityLabel("Предыдущая страница")
+                                .accessibilityAddTraits(.isButton)
+
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { toggleControls() }
+                                .accessibilityLabel("Показать или скрыть меню")
+                                .accessibilityAddTraits(.isButton)
+
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .frame(width: max(40, pageWidth * 0.19))
+                                .onTapGesture { changePage(by: 1) }
+                                .accessibilityLabel("Следующая страница")
+                                .accessibilityAddTraits(.isButton)
+                        }
+                        .frame(width: max(140, pageWidth), height: max(150, pageHeight))
+                    } else {
+                        ProgressView("Размечаем страницы…")
+                            .tint(ReaderTheme.accent)
+                            .font(.system(size: 13))
+                            .foregroundStyle(ReaderTheme.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                .frame(width: max(140, pageWidth), height: max(150, pageHeight))
+                .clipped()
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(pageBackground)
+    }
+
+    private func rebuildPagination(for size: CGSize, force: Bool = false) {
+        let width = min(size.width - 36, 700)
+        let height = size.height - 20
+        guard width >= 150, height >= 170 else { return }
+        if !force,
+           abs(width - lastPageSize.width) < 0.5,
+           abs(height - lastPageSize.height) < 0.5,
+           pagination != nil { return }
+
+        let saved = store.progress(for: chapter.id)
+        let targetParagraph = hasRestored
+            ? currentParagraph
+            : (jump?.paragraph ?? saved.paragraph)
+        let targetOffset = hasRestored
+            ? currentOffset
+            : (jump?.offset ?? saved.offset)
+
+        let next = ChapterPagination(
+            chapter: chapter,
+            annotations: linkedAnnotations,
+            pageWidth: width,
+            pageHeight: height,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing
+        )
+        pagination = next
+        pageIndex = next.page(for: targetParagraph, offset: targetOffset)
+        currentParagraph = min(max(targetParagraph, 0), max(chapter.paragraphs.count - 1, 0))
+        currentOffset = max(0, targetOffset)
+        lastPageSize = CGSize(width: width, height: height)
+        hasRestored = true
+    }
+
+    private func changePage(by delta: Int) {
+        guard let pagination else { return }
+        let next = min(max(0, pageIndex + delta), max(0, pagination.pageCount - 1))
+        guard next != pageIndex else { return }
+
+        withAnimation(.easeOut(duration: 0.14)) {
+            pageIndex = next
+        }
+        let location = pagination.progress(at: next)
+        currentParagraph = location.paragraph
+        currentOffset = location.offset
+        store.recordProgress(
+            for: chapter,
+            paragraph: location.paragraph,
+            offset: location.offset
+        )
+    }
+
+    private func toggleControls() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            controlsVisible.toggle()
+        }
+    }
+
+    // MARK: - Optional continuous reading
+
+    private var scrollingReader: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: paragraphSpacing) {
@@ -58,12 +284,13 @@ struct ReaderView: View {
                         }
                         .id(paragraph.index)
                         .background {
-                            GeometryReader { geometry in
+                            GeometryReader { frame in
                                 Color.clear.preference(
                                     key: ParagraphFramesKey.self,
                                     value: [
-                                        paragraph.index:
-                                            geometry.frame(in: .named("readerScroll")).minY
+                                        paragraph.index: frame.frame(
+                                            in: .named("readerScroll")
+                                        ).minY
                                     ]
                                 )
                             }
@@ -72,100 +299,76 @@ struct ReaderView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
-                .padding(.bottom, 36)
+                .padding(.bottom, 24)
                 .frame(maxWidth: 700)
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        controlsVisible.toggle()
-                    }
-                }
+                .onTapGesture { toggleControls() }
             }
             .scrollIndicators(.hidden)
             .coordinateSpace(name: "readerScroll")
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5).onChanged { _ in
-                    if didRestorePosition { hasScrolled = true }
+                    if hasRestoredScroll { hasScrolled = true }
                 }
             )
-            .background(pageBackground)
             .onPreferenceChange(ParagraphFramesKey.self) { frames in
-                guard didRestorePosition, hasScrolled, !frames.isEmpty else { return }
+                guard hasRestoredScroll, hasScrolled, !frames.isEmpty else { return }
                 let nearest = frames.min { abs($0.value) < abs($1.value) }?.key ?? 0
                 if currentParagraph != nearest {
                     currentParagraph = nearest
+                    currentOffset = 0
+                    if let pagination {
+                        pageIndex = pagination.page(for: nearest, offset: 0)
+                    }
                     store.recordProgress(for: chapter, paragraph: nearest)
                 }
             }
             .onAppear {
-                guard !didRestorePosition else { return }
-                let saved = store.progress(for: chapter.id)
-                let destination = jump?.paragraph ?? saved.paragraph
-                currentParagraph = min(max(0, destination), max(0, chapter.paragraphs.count - 1))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                    proxy.scrollTo(currentParagraph, anchor: .top)
-                    didRestorePosition = true
+                guard !hasRestoredScroll else { return }
+                let location = currentParagraph
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+                    proxy.scrollTo(location, anchor: .top)
+                    hasRestoredScroll = true
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                progressFooter
-            }
-        }
-        .background(pageBackground.ignoresSafeArea())
-        .navigationTitle("Чтение")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden()
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                ReaderBackButton()
-            }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    store.addBookmark(for: chapter, paragraph: currentParagraph)
-                } label: {
-                    Image(systemName: store.hasBookmark(
-                        chapterID: chapter.id,
-                        paragraph: currentParagraph
-                    ) ? "bookmark.fill" : "bookmark")
-                }
-                .accessibilityLabel("Добавить закладку")
-
-                Button {
-                    showReaderSettings = true
-                } label: {
-                    Image(systemName: "textformat.size")
-                }
-                .accessibilityLabel("Настройки чтения")
-
-                NavigationLink {
-                    NotesAndBookmarksView(store: store)
-                } label: {
-                    Image(systemName: "text.book.closed")
-                }
-                .accessibilityLabel("Замечания и закладки")
-            }
-        }
-        .toolbar(controlsVisible ? .visible : .hidden, for: .navigationBar)
-        .toolbarBackground(pageBackground, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .sheet(isPresented: $showReaderSettings) {
-            ReaderSettingsSheet(
-                fontSize: $fontSize,
-                lineSpacing: $lineSpacing,
-                paragraphSpacing: $paragraphSpacing
-            )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $selectedAnnotation) { item in
-            annotationSheet(item)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
         }
     }
 
-    /// Preserve old StarReader's Unicode-scalar highlighting boundaries.
+    // MARK: - One-line, always-visible info footer
+
+    private var informationFooter: some View {
+        TimelineView(.periodic(from: .now, by: 20)) { context in
+            let total = max(1, pagination?.pageCount ?? 1)
+            let current = min(pageIndex + 1, total)
+            let percent = readingMode == "pages"
+                ? (pagination?.progress(at: pageIndex).percent ?? store.progress(for: chapter.id).percent)
+                : store.progress(for: chapter.id).percent
+
+            let percentText = String(
+                format: "%.2f",
+                locale: Locale(identifier: "ru_RU"),
+                min(100, max(0, percent))
+            )
+            let clock = context.date.formatted(date: .omitted, time: .shortened)
+
+            Text("\(current)/\(total) стр.  •  \(percentText)%  •  \(clock)")
+                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                .foregroundStyle(ReaderTheme.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(
+                    "Страница \(current) из \(total), прочитано \(percentText) процентов, время \(clock)"
+                )
+        }
+        .frame(height: 29)
+        .frame(maxWidth: .infinity)
+        .background(pageBackground)
+    }
+
+    // MARK: - Imported notes and highlights in scrolling mode
+
     private func highlightedText(_ paragraph: ReaderParagraph) -> Text {
         let scalars = Array(paragraph.text.unicodeScalars)
         let length = scalars.count
@@ -178,7 +381,6 @@ struct ReaderView: View {
 
         var boundaries = Set([0, length])
         var ranges: [(Int, Int, String)] = []
-
         for item in notes {
             let lastParagraph = max(item.paragraph, item.endParagraph ?? item.paragraph)
             let start = paragraph.index == item.paragraph ? item.start : 0
@@ -193,20 +395,20 @@ struct ReaderView: View {
         }
 
         let cuts = boundaries.sorted()
-        var result = Text("")
+        var text = Text("")
         if cuts.count >= 2 {
             for index in 0..<(cuts.count - 1) {
-                let start = cuts[index], end = cuts[index + 1]
-                guard end > start else { continue }
-                let part = String(String.UnicodeScalarView(scalars[start..<end]))
+                let left = cuts[index], right = cuts[index + 1]
+                guard right > left else { continue }
+                let part = String(String.UnicodeScalarView(scalars[left..<right]))
                 var fragment = Text(part).foregroundColor(ReaderTheme.text.opacity(0.93))
-                if let match = ranges.first(where: { $0.0 <= start && $0.1 >= end }) {
-                    fragment = Text(part).foregroundColor(categoryColor(match.2)).underline()
+                if let match = ranges.first(where: { $0.0 <= left && $0.1 >= right }) {
+                    fragment = Text(part).foregroundColor(noteColor(match.2)).underline()
                 }
-                result = result + fragment
+                text = text + fragment
             }
         }
-        return result
+        return text
     }
 
     private func annotations(at index: Int) -> [ReaderAnnotation] {
@@ -216,37 +418,13 @@ struct ReaderView: View {
         }
     }
 
-    private func categoryColor(_ category: String) -> Color {
+    private func noteColor(_ category: String) -> Color {
         switch category {
         case "Канон": return .orange
         case "Сюжет": return .red
         case "Стиль": return .blue
         case "Цитата": return .green
         default: return ReaderTheme.accent
-        }
-    }
-
-    private var progressFooter: some View {
-        HStack(spacing: 7) {
-            Text("\(min(currentParagraph + 1, max(1, chapter.paragraphs.count)))/\(chapter.paragraphs.count) абз.")
-            Spacer(minLength: 5)
-            Text(store.progress(for: chapter.id).percent.formatted(
-                .number.precision(.fractionLength(2))
-            ) + "%")
-            Spacer(minLength: 5)
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(context.date.formatted(date: .omitted, time: .shortened))
-            }
-        }
-        .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
-        .foregroundStyle(ReaderTheme.secondary)
-        .padding(.horizontal, 18)
-        .frame(height: controlsVisible ? 37 : 29)
-        .background(ReaderTheme.background.opacity(0.97))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(controlsVisible ? 0.07 : 0))
-                .frame(height: 1)
         }
     }
 
@@ -257,7 +435,7 @@ struct ReaderView: View {
                     Text(item.categoryTitle.uppercased())
                         .font(.system(size: 11, weight: .bold))
                         .tracking(1.5)
-                        .foregroundStyle(categoryColor(item.categoryTitle))
+                        .foregroundStyle(noteColor(item.categoryTitle))
                     if !item.quote.isEmpty {
                         Text("«\(item.quote)»")
                             .font(.system(size: 16, design: .serif))
@@ -275,7 +453,7 @@ struct ReaderView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(ReaderTheme.background.ignoresSafeArea())
+            .background(pageBackground.ignoresSafeArea())
             .navigationTitle("Замечание")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -317,51 +495,55 @@ private struct ReaderSettingsSheet: View {
     @Binding var fontSize: Double
     @Binding var lineSpacing: Double
     @Binding var paragraphSpacing: Double
+    @Binding var readingMode: String
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Текст") {
-                    VStack(alignment: .leading, spacing: 9) {
+                Section("Режим чтения") {
+                    Picker("Режим", selection: $readingMode) {
+                        Text("Страницы").tag("pages")
+                        Text("Прокрутка").tag("scroll")
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("В режиме страниц нажимай по краям экрана для перелистывания, по центру — для меню. Нижняя информационная строка всегда остаётся на месте.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Оформление текста") {
+                    VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Label("Размер шрифта", systemImage: "textformat.size")
+                            Text("Размер шрифта")
                             Spacer()
                             Text("\(Int(fontSize))")
-                                .foregroundStyle(ReaderTheme.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         Slider(value: $fontSize, in: 14...24, step: 1)
-                            .tint(ReaderTheme.accent)
                     }
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Межстрочный интервал")
                             Spacer()
                             Text("\(Int(lineSpacing))")
-                                .foregroundStyle(ReaderTheme.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         Slider(value: $lineSpacing, in: 1...10, step: 1)
-                            .tint(ReaderTheme.accent)
                     }
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Расстояние между абзацами")
                             Spacer()
                             Text("\(Int(paragraphSpacing))")
-                                .foregroundStyle(ReaderTheme.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         Slider(value: $paragraphSpacing, in: 8...24, step: 1)
-                            .tint(ReaderTheme.accent)
                     }
                 }
 
                 Section {
-                    Text("Настройки применяются сразу и сохраняются на этом устройстве. Переключение между страницами и прокруткой появится в следующем этапе.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    Button("Сбросить настройки текста") {
+                    Button("Сбросить оформление") {
                         fontSize = 17
                         lineSpacing = 4
                         paragraphSpacing = 13
@@ -369,7 +551,8 @@ private struct ReaderSettingsSheet: View {
                     .foregroundStyle(ReaderTheme.accent)
                 }
             }
-            .navigationTitle("Оформление чтения")
+            .tint(ReaderTheme.accent)
+            .navigationTitle("Чтение и оформление")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
