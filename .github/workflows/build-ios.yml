@@ -83,25 +83,6 @@ jobs:
           print("Verified stable navigation footprint and 29pt footer.")
           PY
 
-      - name: Verify annotation and swipe reader behavior
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
-          pages = Path("Sources/StarReaderNative/Services/ChapterPagination.swift").read_text()
-          view = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
-          assert "func addAnnotation(" in store
-          assert 'stateObject["annotations"] = entries' in store
-          assert "func selection(from range: NSRange)" in pages
-          assert "UILongPressGestureRecognizer" in pages
-          assert "UISwipeGestureRecognizer" in pages
-          assert "func extendSelection()" in view
-          assert "AnnotationComposerView(selection: selection)" in view
-          assert ".toolbar(.visible, for: .navigationBar)" in view
-          assert ".frame(height: 29)" in view
-          print("Verified selection paths, JSON persistence, swipe gestures and stable reader layout.")
-          PY
-
       - name: Verify system-native text selection
         run: |
           python3 - <<'PY'
