@@ -25,6 +25,13 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
+            confirmationNavigation
+        }
+        .tint(palette.accent)
+        .preferredColorScheme(palette.colorScheme)
+    }
+
+    private var libraryScroll: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     introduction
@@ -69,6 +76,10 @@ struct LibraryView: View {
                     }
                     .ignoresSafeArea()
             }
+    }
+
+    private var baseNavigation: some View {
+        libraryScroll
             .navigationTitle("StarReader")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -119,6 +130,10 @@ struct LibraryView: View {
             .navigationDestination(isPresented: $isRecordsPresented) {
                 NotesAndBookmarksView(store: store)
             }
+    }
+
+    private var observedNavigation: some View {
+        baseNavigation
             .onAppear { refreshPageTotals() }
             .onChange(of: store.snapshot.chapters) { _, _ in refreshPageTotals() }
             .onChange(of: fontSize) { _, _ in refreshPageTotals() }
@@ -129,6 +144,10 @@ struct LibraryView: View {
             .sheet(item: $backupToShare) { file in
                 StarReaderBackupShareSheet(url: file.url)
             }
+    }
+
+    private var zipImportNavigation: some View {
+        observedNavigation
             .fileImporter(
                 isPresented: $isImporterPresented,
                 allowedContentTypes: [.zip],
@@ -155,6 +174,10 @@ struct LibraryView: View {
                     store.statusMessage = error.localizedDescription
                 }
             }
+    }
+
+    private var docxImportNavigation: some View {
+        zipImportNavigation
             .fileImporter(
                 isPresented: $isDocxPickerPresented,
                 allowedContentTypes: [
@@ -194,6 +217,10 @@ struct LibraryView: View {
                     store.statusMessage = "Глава «\(chapter.displayTitle)» добавлена в том «\(chapter.volume)»."
                 }
             }
+    }
+
+    private var confirmationNavigation: some View {
+        docxImportNavigation
             .confirmationDialog(
                 "Восстановить библиотеку?",
                 isPresented: $isConfirmationPresented,
@@ -230,9 +257,6 @@ struct LibraryView: View {
             } message: {
                 Text(store.statusMessage ?? "")
             }
-        }
-        .tint(palette.accent)
-        .preferredColorScheme(palette.colorScheme)
     }
 
     private var introduction: some View {
