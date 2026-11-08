@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.4.9", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "49", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.0", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "50", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -163,6 +163,43 @@ jobs:
           assert 'oldLibraryData.write(' in store
           assert 'document.originalData.write' in store
           print('DOCX picker, duplicate consent, backup, atomic JSON and XML limits present.')
+          PY
+
+      - name: Check backup export and responsive page counts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          backup = Path("Sources/StarReaderNative/Services/LibraryBackupExporter.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          counter = Path("Sources/StarReaderNative/Services/ReaderPageCounter.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+
+          # The export must use the SAME manifest/schema and checksum
+          # format as the existing Qt Transfer importer.
+          assert "starreader-qt-library-transfer" in backup
+          assert "starreader-library-manifest.json" in backup
+          assert "data/qt_library.json" in backup
+          assert "data/preview_state.json" in backup
+          assert "SHA256.hash(data: data)" in backup
+          assert "TransferImporter.read(from: archiveURL)" in backup
+          assert "ExportError.missingOriginal" in backup
+          assert "let directory = rootURL" in store
+          assert "func exportBackup()" in store
+          assert "StarReaderBackupShareSheet" in library
+
+          # Totals must be based on identical TextKit pagination and be
+          # invalidated on changes to the library and reader typography.
+          assert "NativeTextPagePlan(" in counter
+          assert "ChapterPagination(" in counter
+          assert "String(chapters.hashValue)" in counter
+          assert "onChange(of: store.snapshot.chapters)" in library
+          assert "onChange(of: fontSize)" in library
+          assert "onChange(of: measuredPageHeight)" in library
+          assert "pageCounter.totalText(" in library
+          assert "starreader.lastPageContentWidth" in reader
+          assert "starreader.lastPageHeight" in reader
+          print("Backup/restore compatibility and dynamic page totals wiring validated.")
           PY
 
       - name: Package unsigned IPA

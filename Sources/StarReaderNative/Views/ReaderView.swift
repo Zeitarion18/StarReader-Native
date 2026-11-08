@@ -18,6 +18,8 @@ struct ReaderView: View {
     @AppStorage("starreader.paragraphSpacing") private var paragraphSpacing: Double = 13
     @AppStorage("starreader.readingMode") private var readingMode = "pages"
     @AppStorage("starreader.colorTheme") private var colorThemeID = ReaderColorTheme.dark.rawValue
+    @AppStorage("starreader.lastPageContentWidth") private var lastMeasuredWidth: Double = 0
+    @AppStorage("starreader.lastPageHeight") private var lastMeasuredHeight: Double = 0
 
     @State private var pagination: ChapterPagination?
     @State private var nativePlan: NativeTextPagePlan?
@@ -270,6 +272,14 @@ struct ReaderView: View {
         currentParagraph = min(max(targetParagraph, 0), max(chapter.paragraphs.count - 1, 0))
         currentOffset = max(0, targetOffset)
         lastPageSize = CGSize(width: width, height: height)
+        // Store the actual TextKit viewport so volume page totals use the
+        // same line wrapping and page boundaries as the reading screen.
+        if abs(lastMeasuredWidth - Double(contentWidth)) > 0.5 {
+            lastMeasuredWidth = Double(contentWidth)
+        }
+        if abs(lastMeasuredHeight - Double(height)) > 0.5 {
+            lastMeasuredHeight = Double(height)
+        }
         hasRestored = true
     }
 

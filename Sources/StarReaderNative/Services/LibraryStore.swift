@@ -160,6 +160,18 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    // MARK: - On-device backup and export
+
+    /// Build the ZIP outside the main actor so large libraries do not stall
+    /// SwiftUI rendering. The exporter independently checks its own ZIP using
+    /// the same restore pipeline as Import ZIP.
+    func exportBackup() async throws -> URL {
+        let directory = rootURL
+        return try await Task.detached(priority: .userInitiated) {
+            try LibraryBackupExporter.export(from: directory)
+        }.value
+    }
+
     // MARK: - Individual DOCX chapter imports
 
     /// Add only one document, preserving every existing chapter, note,

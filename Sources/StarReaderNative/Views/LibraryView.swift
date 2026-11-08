@@ -1,10 +1,19 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct LibraryView: View {
     @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
+    @StateObject private var pageCounter = ReaderPageCounter()
+    @AppStorage("starreader.fontSize") private var fontSize: Double = 17
+    @AppStorage("starreader.lineSpacing") private var lineSpacing: Double = 4
+    @AppStorage("starreader.paragraphSpacing") private var paragraphSpacing: Double = 13
+    @AppStorage("starreader.lastPageContentWidth") private var measuredContentWidth: Double = 0
+    @AppStorage("starreader.lastPageHeight") private var measuredPageHeight: Double = 0
 
+    @State private var isExporting = false
+    @State private var backupToShare: StarReaderBackupFile?
     @State private var isImporterPresented = false
     @State private var isDocxPickerPresented = false
     @State private var isReadingDocx = false
@@ -30,6 +39,7 @@ struct LibraryView: View {
                     }
 
                     notesShortcut
+                    backupShortcut
 
                     HStack(spacing: 7) {
                         Image(systemName: "lock.shield")
@@ -72,6 +82,14 @@ struct LibraryView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        exportBackup()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(isExporting)
+                    .accessibilityLabel("Экспортировать резервную копию ZIP")
+
+                    Button {
                         isDocxPickerPresented = true
                     } label: {
                         Image(systemName: "doc.badge.plus")
@@ -90,16 +108,26 @@ struct LibraryView: View {
             .toolbarBackground(palette.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationDestination(for: String.self) { work in
-                WorkDetailView(store: store, work: work)
+                WorkDetailView(store: store, pageCounter: pageCounter, approximate: measuredContentWidth <= 0 || measuredPageHeight <= 0, work: work)
             }
             .navigationDestination(for: LibraryVolume.self) { volume in
-                VolumeDetailView(store: store, volume: volume)
+                VolumeDetailView(store: store, pageCounter: pageCounter, approximate: measuredContentWidth <= 0 || measuredPageHeight <= 0, volume: volume)
             }
             .navigationDestination(for: LibraryChapter.self) { chapter in
                 ReaderView(store: store, chapter: chapter)
             }
             .navigationDestination(isPresented: $isRecordsPresented) {
                 NotesAndBookmarksView(store: store)
+            }
+            .onAppear { refreshPageTotals() }
+            .onChange(of: store.snapshot.chapters) { _, _ in refreshPageTotals() }
+            .onChange(of: fontSize) { _, _ in refreshPageTotals() }
+            .onChange(of: lineSpacing) { _, _ in refreshPageTotals() }
+            .onChange(of: paragraphSpacing) { _, _ in refreshPageTotals() }
+            .onChange(of: measuredContentWidth) { _, _ in refreshPageTotals() }
+            .onChange(of: measuredPageHeight) { _, _ in refreshPageTotals() }
+            .sheet(item: $backupToShare) { file in
+                StarReaderBackupShareSheet(url: file.url)
             }
             .fileImporter(
                 isPresented: $isImporterPresented,
@@ -311,8 +339,16 @@ struct LibraryView: View {
                                 .lineLimit(3)
                                 .multilineTextAlignment(.leading)
 
-                            let chapters = store.snapshot.chapters.filter { $0.series == work }.count
-                            Text("\(store.volumes(for: work).count) томов · \(chapters) глав")
+                            let workChapters = store.snapshot.chapters.filter { $0.series == work }
+                            Text("\(store.volumes(for: work).count) томов · \(workChapters.count) глав")
+                                .font(.system(size: 12))
+                                .foregroundStyle(palette.secondary)
+                            Text(pageCounter.totalText(
+                                for: workChapters,
+                                approximate: measuredContentWidth <= 0 || measuredPageHeight <= 0
+                            ))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(palette.accent)
                                 .font(.system(size: 12))
                                 .foregroundStyle(palette.secondary)
                         }
@@ -332,6 +368,75 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var backupShortcut: some View {
+        Button {
+            exportBackup()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "externaldrive.badge.timemachine")
+                    .font(.system(size: 20))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isExporting ? "Создаём ZIP…" : "Резервная копия библиотеки")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(palette.text)
+                    Text("Экспорт глав, заметок, закладок и прогресса")
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+                Spacer(minLength: 4)
+                if isExporting {
+                    ProgressView().tint(palette.accent)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+            .padding(16)
+            .background(
+                palette.surface,
+                in: RoundedRectangle(cornerRadius: 18)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isExporting)
+    }
+
+    private func exportBackup() {
+        guard !isExporting else { return }
+        isExporting = true
+        Task {
+            defer { isExporting = false }
+            do {
+                let url = try await store.exportBackup()
+                backupToShare = StarReaderBackupFile(url: url)
+            } catch {
+                store.statusMessage = "Резервная копия не создана: " +
+                    error.localizedDescription
+            }
+        }
+    }
+
+    private func refreshPageTotals() {
+        // Once ReaderView has been opened, use its real TextKit viewport.
+        // Before that, explicitly mark the totals as approximate.
+        let fallbackWidth = max(140, min(UIScreen.main.bounds.width - 44, 692))
+        let fallbackHeight = max(150, UIScreen.main.bounds.height - 200)
+        pageCounter.refresh(
+            chapters: store.snapshot.chapters,
+            annotations: store.annotations,
+            contentWidth: measuredContentWidth > 0
+                ? CGFloat(measuredContentWidth) : fallbackWidth,
+            pageHeight: measuredPageHeight > 0
+                ? CGFloat(measuredPageHeight) : fallbackHeight,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            palette: palette
+        )
     }
 
     private var notesShortcut: some View {
@@ -426,6 +531,8 @@ struct LibraryView: View {
 private struct WorkDetailView: View {
     @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
+    @ObservedObject var pageCounter: ReaderPageCounter
+    let approximate: Bool
     let work: String
     @State private var volumeToDelete: LibraryVolume?
 
@@ -443,6 +550,12 @@ private struct WorkDetailView: View {
                             .font(.system(size: 20, weight: .bold, design: .serif))
                             .foregroundStyle(palette.text)
                             .fixedSize(horizontal: false, vertical: true)
+                        Text(pageCounter.totalText(
+                            for: store.snapshot.chapters.filter { $0.series == work },
+                            approximate: approximate
+                        ))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(palette.accent)
                     }
                 }
 
@@ -474,6 +587,12 @@ private struct WorkDetailView: View {
                                             Text("\(store.chapters(for: work, volume: volume.title).count) глав")
                                                 .font(.system(size: 12))
                                                 .foregroundStyle(palette.secondary)
+                                            Text(pageCounter.totalText(
+                                                for: store.chapters(for: work, volume: volume.title),
+                                                approximate: approximate
+                                            ))
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundStyle(palette.accent)
                                         }
                                         Spacer()
                                         Image(systemName: "chevron.right")
@@ -569,6 +688,8 @@ private struct WorkDetailView: View {
 private struct VolumeDetailView: View {
     @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
+    @ObservedObject var pageCounter: ReaderPageCounter
+    let approximate: Bool
     let volume: LibraryVolume
     @State private var chapterToDelete: LibraryChapter?
 
@@ -590,6 +711,9 @@ private struct VolumeDetailView: View {
                     Text("\(chapters.count) глав")
                         .font(.system(size: 13))
                         .foregroundStyle(palette.secondary)
+                    Text("Всего: " + pageCounter.totalText(for: chapters, approximate: approximate))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(palette.accent)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -631,6 +755,8 @@ private struct VolumeDetailView: View {
                                             Text("\(chapter.paragraphs.count) абз.")
                                             Text("·")
                                             Text("\(Int(store.progress(for: chapter.id).percent.rounded()))%")
+                                        Text("·")
+                                        Text(pageCounter.totalText(for: [chapter], approximate: approximate))
                                         }
                                         .font(.system(size: 12))
                                         .foregroundStyle(palette.secondary)
@@ -715,4 +841,26 @@ private struct VolumeDetailView: View {
             Text(store.statusMessage ?? "")
         }
     }
+}
+
+
+private struct StarReaderBackupFile: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct StarReaderBackupShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(
+            activityItems: [url],
+            applicationActivities: nil
+        )
+    }
+
+    func updateUIViewController(
+        _ controller: UIActivityViewController,
+        context: Context
+    ) {}
 }
