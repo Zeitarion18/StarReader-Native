@@ -204,6 +204,159 @@ final class ChapterPagination {
         return (paragraph: span.index, offset: scalarOffset, percent: fraction)
     }
 
+    /// Resolve a selected CoreText range to exact chapter paragraphs and
+    /// Unicode-scalar offsets. Imported notes and new notes share this format.
+    func selection(from range: NSRange) -> ReaderTextSelection? {
+        guard range.location != NSNotFound, range.length > 0,
+              let first = paragraphs.first, let last = paragraphs.last else { return nil }
+        let lower = max(range.location, first.startUTF16)
+        let upper = min(NSMaxRange(range), last.startUTF16 + last.lengthUTF16)
+        guard lower < upper else { return nil }
+
+        var pieces: [(index: Int, start: Int, end: Int, quote: String)] = []
+        for span in paragraphs {
+            let pStart = span.startUTF16
+            let pEnd = pStart + span.lengthUTF16
+            if pStart >= upper { break }
+            if pEnd <= lower { continue }
+            let localStart = max(lower, pStart) - pStart
+            let localEnd = min(upper, pEnd) - pStart
+            guard localStart < localEnd else { continue }
+
+            let scalarStart = Self.scalarOffset(
+                in: span.text, atUTF16: localStart, roundUp: false
+            )
+            let scalarEnd = Self.scalarOffset(
+                in: span.text, atUTF16: localEnd, roundUp: true
+            )
+            guard scalarStart < scalarEnd else { continue }
+            let scalars = Array(span.text.unicodeScalars)
+            let selected = String(String.UnicodeScalarView(
+                scalars[scalarStart..<scalarEnd]
+            ))
+            pieces.append((span.index, scalarStart, scalarEnd, selected))
+        }
+
+        guard let begin = pieces.first, let finish = pieces.last else {
+            return nil
+        }
+        // Any original paragraph boundary is represented by a line break.
+        // Neither chapter titles nor unrelated text can enter the quote.
+        let quote = pieces.map(\.quote).joined(separator: "\n")
+        guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let globalStart = paragraphs[begin.index].startUTF16
+            + Self.utf16Length(ofPrefix: paragraphs[begin.index].text, scalars: begin.start)
+        let globalEnd = paragraphs[finish.index].startUTF16
+            + Self.utf16Length(ofPrefix: paragraphs[finish.index].text, scalars: finish.end)
+
+        return ReaderTextSelection(
+            startUTF16: globalStart,
+            endUTF16: globalEnd,
+            startParagraph: begin.index,
+            startOffset: begin.start,
+            endParagraph: finish.index,
+            endOffset: finish.end,
+            quote: quote
+        )
+    }
+
+    /// Return the word at the touch point, so a short long press highlights
+    /// a useful fragment even before the finger begins dragging.
+    func wordRange(around location: Int) -> NSRange? {
+        let nsText = attributedText.string as NSString
+        guard nsText.length > 0 else { return nil }
+        let position = min(max(0, location), nsText.length - 1)
+        let separators = Set(" \t\r\n.,!?;:—–()[]{}«»\"'".utf16)
+        var lower = position
+        var upper = position
+
+        if separators.contains(nsText.character(at: upper)) {
+            if upper + 1 < nsText.length &&
+               !separators.contains(nsText.character(at: upper + 1)) {
+                upper += 1
+                lower += 1
+            } else {
+                return nil
+            }
+        }
+        while lower > 0 && !separators.contains(nsText.character(at: lower - 1)) {
+            lower -= 1
+        }
+        while upper < nsText.length &&
+              !separators.contains(nsText.character(at: upper)) {
+            upper += 1
+        }
+        guard upper > lower else { return nil }
+        let range = NSRange(location: lower, length: upper - lower)
+        return selection(from: range) == nil ? nil : range
+    }
+
+    /// Converts a finger position into a CoreText string index using the
+    /// same frame and line origins that were used to render the page.
+    func stringIndex(at point: CGPoint, onPage pageIndex: Int) -> Int? {
+        guard chapters.indices.contains(pageIndex) else { return nil }
+        let page = chapters[pageIndex]
+        let path = CGPath(
+            rect: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight),
+            transform: nil
+        )
+        let frame = CTFramesetterCreateFrame(
+            framesetter,
+            CFRange(location: page.start, length: page.length),
+            path,
+            nil
+        )
+        let lines = CTFrameGetLines(frame) as! [CTLine]
+        guard !lines.isEmpty else { return nil }
+
+        var origins = Array(repeating: CGPoint.zero, count: lines.count)
+        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: 0), &origins)
+        let coreY = pageHeight - point.y
+        let nearest = lines.indices.min { left, right in
+            abs(origins[left].y - coreY) < abs(origins[right].y - coreY)
+        } ?? 0
+
+        let line = lines[nearest]
+        let lineRange = CTLineGetStringRange(line)
+        let localX = point.x - origins[nearest].x
+        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let result: Int
+        if localX <= 0 {
+            result = lineRange.location
+        } else if localX >= lineWidth {
+            result = lineRange.location + lineRange.length
+        } else {
+            let index = CTLineGetStringIndexForPosition(
+                line, CGPoint(x: localX, y: 0)
+            )
+            result = index == kCFNotFound
+                ? lineRange.location + lineRange.length
+                : index
+        }
+        return min(max(page.start, result), page.start + page.length)
+    }
+
+    private static func scalarOffset(
+        in text: String, atUTF16 location: Int, roundUp: Bool
+    ) -> Int {
+        let target = min(max(0, location), text.utf16.count)
+        var cursor = 0
+        var count = 0
+        for scalar in text.unicodeScalars {
+            if cursor >= target { break }
+            let next = cursor + (scalar.value > 0xFFFF ? 2 : 1)
+            if next > target {
+                return roundUp ? count + 1 : count
+            }
+            count += 1
+            cursor = next
+        }
+        return count
+    }
+
     private static func utf16Length(ofPrefix source: String, scalars: Int) -> Int {
         String(String.UnicodeScalarView(source.unicodeScalars.prefix(scalars))).utf16.count
     }
@@ -225,11 +378,16 @@ final class ChapterPagination {
     }
 }
 
-/// Renders the same CoreText frame that was used to determine the page break,
-/// so text cannot silently flow behind the narrow information bar.
+/// A native CoreText page surface with precise long-press selection.
+/// Tap/swipe handling lives on the same UIView as the glyph drawing, so touch
+/// coordinates never drift relative to the rendered page.
 struct CoreTextPage: UIViewRepresentable {
     let pagination: ChapterPagination
     let pageIndex: Int
+    let selection: ReaderTextSelection?
+    let onTap: (ReaderTapZone) -> Void
+    let onSwipe: (Int) -> Void
+    let onSelection: (NSRange, Bool) -> Void
 
     func makeUIView(context: Context) -> CoreTextPageCanvas {
         let view = CoreTextPageCanvas()
@@ -241,13 +399,131 @@ struct CoreTextPage: UIViewRepresentable {
     func updateUIView(_ view: CoreTextPageCanvas, context: Context) {
         view.pagination = pagination
         view.pageIndex = pageIndex
+        view.selectedRange = selection.map {
+            NSRange(location: $0.startUTF16, length: $0.lengthUTF16)
+        }
+        view.onTap = onTap
+        view.onSwipe = onSwipe
+        view.onSelection = onSelection
         view.setNeedsDisplay()
     }
+}
+
+enum ReaderTapZone {
+    case left, center, right
 }
 
 final class CoreTextPageCanvas: UIView {
     var pagination: ChapterPagination?
     var pageIndex = 0
+    var selectedRange: NSRange?
+    var onTap: ((ReaderTapZone) -> Void)?
+    var onSwipe: ((Int) -> Void)?
+    var onSelection: ((NSRange, Bool) -> Void)?
+
+    private var initialWordRange: NSRange?
+    private var currentDragRange: NSRange?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        installGestures()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installGestures()
+    }
+
+    private func installGestures() {
+        isUserInteractionEnabled = true
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
+        addGestureRecognizer(tap)
+
+        let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
+        swipeLeft.direction = .left
+        addGestureRecognizer(swipeLeft)
+
+        let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
+        swipeRight.direction = .right
+        addGestureRecognizer(swipeRight)
+
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        hold.minimumPressDuration = 0.32
+        hold.allowableMovement = 14
+        addGestureRecognizer(hold)
+        tap.require(toFail: hold)
+    }
+
+    @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        let x = recognizer.location(in: self).x
+        let zone: ReaderTapZone
+        if x < bounds.width * 0.20 {
+            zone = .left
+        } else if x > bounds.width * 0.80 {
+            zone = .right
+        } else {
+            zone = .center
+        }
+        onTap?(zone)
+    }
+
+    @objc private func swiped(_ recognizer: UISwipeGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        // Left swipe turns to the next page; right swipe goes back.
+        onSwipe?(recognizer.direction == .left ? 1 : -1)
+    }
+
+    @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+        guard let pagination,
+              let index = pagination.stringIndex(
+                at: recognizer.location(in: self),
+                onPage: pageIndex
+              ) else { return }
+
+        switch recognizer.state {
+        case .began:
+            guard let word = pagination.wordRange(around: index) else {
+                initialWordRange = nil
+                return
+            }
+            initialWordRange = word
+            currentDragRange = word
+            UISelectionFeedbackGenerator().selectionChanged()
+            onSelection?(word, false)
+
+        case .changed:
+            guard let initial = initialWordRange else { return }
+            let start: Int
+            let end: Int
+            if index < initial.location {
+                start = index
+                end = NSMaxRange(initial)
+            } else {
+                start = initial.location
+                end = max(index, NSMaxRange(initial))
+            }
+            guard start < end else { return }
+            let range = NSRange(location: start, length: end - start)
+            currentDragRange = range
+            onSelection?(range, false)
+
+        case .ended:
+            if let range = currentDragRange {
+                onSelection?(range, true)
+            }
+            initialWordRange = nil
+            currentDragRange = nil
+
+        case .cancelled, .failed:
+            initialWordRange = nil
+            currentDragRange = nil
+
+        default:
+            break
+        }
+    }
 
     override func draw(_ rect: CGRect) {
         guard let pagination, let context = UIGraphicsGetCurrentContext(),
@@ -261,11 +537,56 @@ final class CoreTextPageCanvas: UIView {
             path,
             nil
         )
+
         context.saveGState()
         context.textMatrix = .identity
         context.translateBy(x: 0, y: bounds.height)
         context.scaleBy(x: 1, y: -1)
+
+        if let selectedRange, selectedRange.length > 0 {
+            drawHighlight(in: frame, selectedRange: selectedRange, context: context)
+        }
         CTFrameDraw(frame, context)
         context.restoreGState()
+    }
+
+    private func drawHighlight(
+        in frame: CTFrame,
+        selectedRange: NSRange,
+        context: CGContext
+    ) {
+        let lines = CTFrameGetLines(frame) as! [CTLine]
+        guard !lines.isEmpty else { return }
+
+        var origins = Array(repeating: CGPoint.zero, count: lines.count)
+        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: 0), &origins)
+        let selectionEnd = NSMaxRange(selectedRange)
+
+        context.setFillColor(
+            UIColor(red: 0.30, green: 0.82, blue: 0.92, alpha: 0.30).cgColor
+        )
+        for i in lines.indices {
+            let line = lines[i]
+            let lineRange = CTLineGetStringRange(line)
+            let from = max(lineRange.location, selectedRange.location)
+            let to = min(lineRange.location + lineRange.length, selectionEnd)
+            guard from < to else { continue }
+
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            _ = CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+            let beginX = CTLineGetOffsetForStringIndex(line, from, nil)
+            let endX = CTLineGetOffsetForStringIndex(line, to, nil)
+            let left = origins[i].x + min(beginX, endX)
+            let width = max(2, abs(endX - beginX))
+            context.fill(
+                CGRect(
+                    x: left,
+                    y: origins[i].y - descent - 2,
+                    width: width,
+                    height: ascent + descent + 4
+                )
+            )
+        }
     }
 }
