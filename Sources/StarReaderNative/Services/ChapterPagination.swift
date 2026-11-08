@@ -250,7 +250,7 @@ final class CoreTextPageCanvas: UIView {
     var pageIndex = 0
 
     override func draw(_ rect: CGRect) {
-        guard let pagination, let context = UIGraphicsGetCurrent(),
+        guard let pagination, let context = UIGraphicsGetCurrentContext(),
               pagination.chapters.indices.contains(pageIndex) else { return }
 
         let page = pagination.chapters[pageIndex]
