@@ -18,6 +18,7 @@ struct ReaderView: View {
     @AppStorage("starreader.readingMode") private var readingMode = "pages"
 
     @State private var pagination: ChapterPagination?
+    @State private var nativePlan: NativeTextPagePlan?
     @State private var pageIndex = 0
     @State private var currentParagraph = 0
     @State private var currentOffset = 0
@@ -181,57 +182,41 @@ struct ReaderView: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
 
-                ZStack {
-                    if let pagination {
-                        CoreTextPage(
-                            pagination: pagination,
-                            pageIndex: min(pageIndex, pagination.pageCount - 1),
-                            selection: selectedText,
-                            onTap: { zone in
-                                handlePageTap(zone)
-                            },
-                            onSwipe: { direction in
-                                if selectedText == nil {
-                                    changePage(by: direction)
-                                } else {
-                                    // While selecting, allow looking at the
-                                    // next page without altering reading progress.
-                                    moveSelectionPage(by: direction)
-                                }
-                            },
-                            onSelection: { range, _ in
-                                if let selection = pagination.selection(from: range) {
-                                    selectedText = selection
-                                }
-                            }
+                if let plan = nativePlan {
+                    NativeSelectablePage(
+                        plan: plan,
+                        pageIndex: plan.clamp(pageIndex),
+                        onTurn: { direction in
+                            changePage(by: direction)
+                        },
+                        onTapCenter: {
+                            toggleControls()
+                        },
+                        onMakeNote: { selection in
+                            composingSelection = selection
+                        }
+                    )
+                    .frame(
+                        width: max(140, pageWidth),
+                        height: max(150, pageHeight)
+                    )
+                    .accessibilityLabel(
+                        "Страница \(pageIndex + 1) из \(plan.pageCount). Удержи палец на тексте для стандартного выделения iOS."
+                    )
+                } else {
+                    ProgressView("Размечаем страницы…")
+                        .tint(ReaderTheme.accent)
+                        .font(.system(size: 13))
+                        .foregroundStyle(ReaderTheme.secondary)
+                        .frame(
+                            width: max(140, pageWidth),
+                            height: max(150, pageHeight)
                         )
-                        .frame(width: max(140, pageWidth), height: max(150, pageHeight))
-                        .accessibilityLabel(
-                            "Страница \(pageIndex + 1) из \(pagination.pageCount)"
-                        )
-                        .accessibilityAddTraits(.isStaticText)
-
-                    } else {
-                        ProgressView("Размечаем страницы…")
-                            .tint(ReaderTheme.accent)
-                            .font(.system(size: 13))
-                            .foregroundStyle(ReaderTheme.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
                 }
-                .frame(width: max(140, pageWidth), height: max(150, pageHeight))
-                .clipped()
 
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .bottom) {
-                if let selection = selectedText {
-                    selectionActions(selection)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 9)
-                }
-            }
         }
         .background(pageBackground)
     }
@@ -262,8 +247,16 @@ struct ReaderView: View {
             lineSpacing: lineSpacing,
             paragraphSpacing: paragraphSpacing
         )
+        // Use TextKit for both page measurement and on-screen rendering.
+        // Native UITextView selection handles use this exact same layout.
+        let native = NativeTextPagePlan(
+            source: next,
+            pageWidth: width,
+            pageHeight: height
+        )
         pagination = next
-        pageIndex = next.page(for: targetParagraph, offset: targetOffset)
+        nativePlan = native
+        pageIndex = native.page(for: targetParagraph, offset: targetOffset)
         currentParagraph = min(max(targetParagraph, 0), max(chapter.paragraphs.count - 1, 0))
         currentOffset = max(0, targetOffset)
         lastPageSize = CGSize(width: width, height: height)
@@ -271,14 +264,12 @@ struct ReaderView: View {
     }
 
     private func changePage(by delta: Int) {
-        guard let pagination else { return }
-        let next = min(max(0, pageIndex + delta), max(0, pagination.pageCount - 1))
+        guard let nativePlan else { return }
+        let next = nativePlan.clamp(pageIndex + delta)
         guard next != pageIndex else { return }
-
-        withAnimation(.easeOut(duration: 0.14)) {
-            pageIndex = next
-        }
-        let location = pagination.progress(at: next)
+        // Avoid implicit animations stretching UITextView or its text glyphs.
+        pageIndex = next
+        let location = nativePlan.location(at: next)
         currentParagraph = location.paragraph
         currentOffset = location.offset
         store.recordProgress(
@@ -286,108 +277,6 @@ struct ReaderView: View {
             paragraph: location.paragraph,
             offset: location.offset
         )
-    }
-
-    private func handlePageTap(_ zone: ReaderTapZone) {
-        // One tap outside a selection dismisses the contextual commands.
-        if selectedText != nil {
-            selectedText = nil
-            return
-        }
-        switch zone {
-        case .left: changePage(by: -1)
-        case .center: toggleControls()
-        case .right: changePage(by: 1)
-        }
-    }
-
-    private func moveSelectionPage(by delta: Int) {
-        guard let pagination else { return }
-        pageIndex = min(max(0, pageIndex + delta), max(0, pagination.pageCount - 1))
-    }
-
-    private func extendSelection() {
-        guard let pagination, let selected = selectedText else { return }
-        let lastSelectedIndex = max(selected.startUTF16, selected.endUTF16 - 1)
-        guard let lastPage = pagination.chapters.firstIndex(where: { page in
-            lastSelectedIndex >= page.start && lastSelectedIndex < page.start + page.length
-        }), lastPage + 1 < pagination.pageCount else { return }
-
-        let newPage = pagination.chapters[lastPage + 1]
-        let end = newPage.start + newPage.length
-        let range = NSRange(
-            location: selected.startUTF16,
-            length: end - selected.startUTF16
-        )
-        if let extended = pagination.selection(from: range) {
-            selectedText = extended
-            // Show the new segment while leaving the saved reading
-            // position untouched.
-            pageIndex = lastPage + 1
-        }
-    }
-
-    private func selectionActions(_ selection: ReaderTextSelection) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Text(selection.quote)
-                .font(.system(size: 13, design: .serif))
-                .foregroundStyle(ReaderTheme.text)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 11) {
-                Button {
-                    composingSelection = selection
-                } label: {
-                    Label("Заметка", systemImage: "highlighter")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(ReaderTheme.background)
-                        .padding(.horizontal, 11)
-                        .frame(height: 34)
-                        .background(ReaderTheme.accent, in: Capsule())
-                }
-
-                Button {
-                    UIPasteboard.general.string = selection.quote
-                    selectedText = nil
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 14))
-                        .foregroundStyle(ReaderTheme.text)
-                        .frame(width: 34, height: 34)
-                }
-                .accessibilityLabel("Скопировать выделение")
-
-                Button {
-                    extendSelection()
-                } label: {
-                    Image(systemName: "arrow.right.to.line")
-                        .font(.system(size: 14))
-                        .foregroundStyle(ReaderTheme.text)
-                        .frame(width: 34, height: 34)
-                }
-                .accessibilityLabel("Продлить выделение на следующую страницу")
-
-                Spacer(minLength: 0)
-
-                Button {
-                    selectedText = nil
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(ReaderTheme.secondary)
-                        .frame(width: 30, height: 34)
-                }
-                .accessibilityLabel("Отменить выделение")
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(13)
-        .background(ReaderTheme.surfaceHigh.opacity(0.98), in: RoundedRectangle(cornerRadius: 15))
-        .overlay {
-            RoundedRectangle(cornerRadius: 15)
-                .strokeBorder(ReaderTheme.accent.opacity(0.22), lineWidth: 1)
-        }
     }
 
     private func toggleControls() {
@@ -461,8 +350,8 @@ struct ReaderView: View {
                 if currentParagraph != nearest {
                     currentParagraph = nearest
                     currentOffset = 0
-                    if let pagination {
-                        pageIndex = pagination.page(for: nearest, offset: 0)
+                    if nativePlan != nil {
+                        pageIndex = nativePlan?.page(for: nearest, offset: 0) ?? 0
                     }
                     store.recordProgress(for: chapter, paragraph: nearest)
                 }
@@ -482,10 +371,10 @@ struct ReaderView: View {
 
     private var informationFooter: some View {
         TimelineView(.periodic(from: .now, by: 20)) { context in
-            let total = max(1, pagination?.pageCount ?? 1)
+            let total = max(1, nativePlan?.pageCount ?? 1)
             let current = min(pageIndex + 1, total)
             let percent = readingMode == "pages"
-                ? (pagination?.progress(at: pageIndex).percent ?? store.progress(for: chapter.id).percent)
+                ? (nativePlan?.location(at: pageIndex).percent ?? store.progress(for: chapter.id).percent)
                 : store.progress(for: chapter.id).percent
 
             let percentText = String(
