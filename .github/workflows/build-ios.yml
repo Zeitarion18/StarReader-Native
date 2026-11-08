@@ -60,8 +60,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.4.3", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "43", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.4.4", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "44", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -100,6 +100,22 @@ jobs:
           assert ".toolbar(.visible, for: .navigationBar)" in view
           assert ".frame(height: 29)" in view
           print("Verified selection paths, JSON persistence, swipe gestures and stable reader layout.")
+          PY
+
+      - name: Verify system-native text selection
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          assert "UITextView" in native
+          assert "isSelectable = true" in native
+          assert "editMenuForTextIn range: NSRange" in native
+          assert "NativeSelectablePage(" in reader
+          assert "CoreTextPage(" not in reader
+          assert ".toolbar(.visible, for: .navigationBar)" in reader
+          assert ".frame(height: 29)" in reader
+          print("Native iOS selection, same-engine pagination and stable status footer verified.")
           PY
 
       - name: Package unsigned IPA
