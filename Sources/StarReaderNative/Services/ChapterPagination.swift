@@ -242,7 +242,7 @@ final class ChapterPagination {
         }
         // Any original paragraph boundary is represented by a line break.
         // Neither chapter titles nor unrelated text can enter the quote.
-        let quote = pieces.map(\.quote).joined(separator: "\n")
+        let quote = pieces.map { $0.quote }.joined(separator: "\n")
         guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
