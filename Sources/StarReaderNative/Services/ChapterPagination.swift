@@ -357,6 +357,47 @@ final class ChapterPagination {
         return count
     }
 
+    /// Shared stable source offsets for TextKit pagination and JSON progress.
+    func utf16Location(for paragraph: Int, offset: Int) -> Int {
+        guard !paragraphs.isEmpty else { return 0 }
+        let index = min(max(0, paragraph), paragraphs.count - 1)
+        let span = paragraphs[index]
+        let safeOffset = min(max(0, offset), span.text.unicodeScalars.count)
+        return span.startUTF16 + Self.utf16Length(
+            ofPrefix: span.text, scalars: safeOffset
+        )
+    }
+
+    func position(atUTF16 location: Int) -> (
+        paragraph: Int, offset: Int, percent: Double
+    ) {
+        guard !paragraphs.isEmpty else {
+            return (paragraph: 0, offset: 0, percent: 0)
+        }
+
+        let position = max(0, location)
+        var spanIndex = 0
+        for i in paragraphs.indices {
+            if paragraphs[i].startUTF16 <= position {
+                spanIndex = i
+            } else { break }
+        }
+        let span = paragraphs[spanIndex]
+        let localUTF16 = max(
+            0, min(span.lengthUTF16, position - span.startUTF16)
+        )
+        let scalarOffset = Self.scalarOffset(
+            in: span.text, atUTF16: localUTF16, roundUp: false
+        )
+        let preceding = paragraphScalarCounts.prefix(spanIndex).reduce(0, +)
+        let percent = min(
+            100,
+            max(0, Double(preceding + scalarOffset) /
+                Double(chapterScalarCount) * 100)
+        )
+        return (span.index, scalarOffset, percent)
+    }
+
     private static func utf16Length(ofPrefix source: String, scalars: Int) -> Int {
         String(String.UnicodeScalarView(source.unicodeScalars.prefix(scalars))).utf16.count
     }
