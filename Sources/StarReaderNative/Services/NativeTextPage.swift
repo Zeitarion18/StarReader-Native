@@ -37,11 +37,12 @@ final class NativeTextPagePlan {
         var offsets: [CGFloat] = [0]
         var characters: [Int] = [0]
         var lastStart: CGFloat = 0
+        let visibleHeight = self.pageHeight
 
         manager.enumerateLineFragments(forGlyphRange: glyphRange) {
             rect, _, _, glyphs, _ in
             // A new page starts at a real TextKit line, never halfway through it.
-            if rect.maxY > lastStart + self.pageHeight &&
+            if rect.maxY > lastStart + visibleHeight &&
                rect.minY > lastStart + 1 {
                 let nextCharacter = manager.characterIndexForGlyph(at: glyphs.location)
                 guard nextCharacter > (characters.last ?? -1) else { return }
