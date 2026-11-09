@@ -57,8 +57,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.5.0", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "50", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.1", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "51", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -197,6 +197,38 @@ jobs:
           assert "starreader.lastPageContentWidth" in reader
           assert "starreader.lastPageHeight" in reader
           print("Backup/restore compatibility and dynamic page totals wiring validated.")
+          PY
+
+      - name: Test chapter edits, annotation safety and backups
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/LibraryModels.swift \
+            Sources/StarReaderNative/Models/ReaderTextSelection.swift \
+            Sources/StarReaderNative/Services/ChapterEditing.swift \
+            Tests/ChapterEditingSmoke.swift \
+            -o /tmp/starreader-editor-tests
+          /tmp/starreader-editor-tests
+
+      - name: Verify editor is wired into the native reader
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          editor = Path("Sources/StarReaderNative/Views/ChapterEditorSheet.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          notes = Path("Sources/StarReaderNative/Views/NotesAndBookmarksView.swift").read_text()
+          assert 'title: "Изменить"' in native
+          assert 'onEditSelection' in native and 'onEditSelection:' in reader
+          assert 'ChapterEditorSheet(' in reader
+          assert 'store.chapter(for: initialChapter.id)' in reader
+          assert 'onChange(of: chapter)' in reader
+          assert 'previewChapterEdits(' in store and 'saveChapterEdits(' in store
+          assert 'BeforeEdit-' in store
+          assert 'oldLibrary.write(to: libraryURL, options: .atomic)' in store
+          assert 'Отменить правки' in editor and 'showDiscardWarning' in editor
+          assert 'needs_review' in notes and 'needsReview' in notes
+          print('PASS: native quick edit, full editor, live chapter reload, backed-up JSON.')
           PY
 
       - name: Package unsigned IPA

@@ -96,6 +96,7 @@ final class ChapterPagination {
             )
 
             let related = annotations.filter { item in
+                guard item.status != "needs_review" else { return false }
                 let last = max(item.paragraph, item.endParagraph ?? item.paragraph)
                 return item.paragraph <= paragraph.index && paragraph.index <= last
             }

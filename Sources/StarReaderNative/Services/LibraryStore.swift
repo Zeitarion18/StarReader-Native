@@ -274,6 +274,101 @@ final class LibraryStore: ObservableObject {
         return newChapter
     }
 
+    // MARK: - Safe chapter editing
+
+    func previewChapterEdits(
+        for chapter: LibraryChapter,
+        title: String,
+        paragraphs: [ChapterEditing.Paragraph]
+    ) throws -> ChapterEditing.Result {
+        let fm = FileManager.default
+        let source = try Data(contentsOf: libraryURL)
+        let state = fm.fileExists(atPath: stateURL.path)
+            ? try Data(contentsOf: stateURL)
+            : try JSONSerialization.data(withJSONObject: freshState())
+        return try ChapterEditing.apply(
+            libraryData: source,
+            stateData: state,
+            chapterID: chapter.id,
+            expectedTitle: chapter.displayTitle,
+            expectedParagraphs: ChapterEditing.paragraphs(of: chapter),
+            title: title,
+            paragraphs: paragraphs
+        )
+    }
+
+    @discardableResult
+    func saveChapterEdits(
+        for chapter: LibraryChapter,
+        title: String,
+        paragraphs: [ChapterEditing.Paragraph]
+    ) throws -> ChapterEditing.Result {
+        let fm = FileManager.default
+        let oldLibrary = try Data(contentsOf: libraryURL)
+        let oldState: Data? = fm.fileExists(atPath: stateURL.path)
+            ? try Data(contentsOf: stateURL) : nil
+        let state = try oldState ?? JSONSerialization.data(
+            withJSONObject: freshState()
+        )
+        // Calculate all remappings before touching anything on disk.
+        let result = try ChapterEditing.apply(
+            libraryData: oldLibrary,
+            stateData: state,
+            chapterID: chapter.id,
+            expectedTitle: chapter.displayTitle,
+            expectedParagraphs: ChapterEditing.paragraphs(of: chapter),
+            title: title,
+            paragraphs: paragraphs
+        )
+        _ = try LibrarySnapshot.parse(result.libraryData)
+
+        let backup = rootURL
+            .appendingPathComponent("Edits", isDirectory: true)
+            .appendingPathComponent(
+                "BeforeEdit-" + UUID().uuidString, isDirectory: true
+            )
+        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
+        // Keep the exact prior state and library so annotated passages can
+        // always be recovered. Imported original DOCX never changes.
+        try oldLibrary.write(
+            to: backup.appendingPathComponent("qt_library.json"),
+            options: .atomic
+        )
+        if let oldState {
+            try oldState.write(
+                to: backup.appendingPathComponent("preview_state.json"),
+                options: .atomic
+            )
+        }
+
+        do {
+            try result.libraryData.write(to: libraryURL, options: .atomic)
+            try result.stateData.write(to: stateURL, options: .atomic)
+        } catch {
+            let saveError = error
+            do {
+                try oldLibrary.write(to: libraryURL, options: .atomic)
+                if let oldState {
+                    try oldState.write(to: stateURL, options: .atomic)
+                } else if fm.fileExists(atPath: stateURL.path) {
+                    try fm.removeItem(at: stateURL)
+                }
+            } catch {
+                throw NSError(
+                    domain: "StarReader.ChapterEditing", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Не удалось сохранить правки и откатить библиотеку. " +
+                        "Исходные данные есть в резервной папке BeforeEdit. " +
+                        "Не вноси новые изменения до восстановления."]
+                )
+            }
+            throw saveError
+        }
+
+        loadFromDisk()
+        return result
+    }
+
     // MARK: - Confirmed library deletion (always backup first)
 
     func deleteChapter(_ chapter: LibraryChapter) throws {

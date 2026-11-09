@@ -22,10 +22,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.starreader.personalreader
         PRODUCT_NAME: StarReaderNative
         INFOPLIST_KEY_CFBundleDisplayName: StarReader
-        MARKETING_VERSION: 0.5.0
-        CURRENT_PROJECT_VERSION: 50
-        INFOPLIST_KEY_CFBundleShortVersionString: "0.5.0"
-        INFOPLIST_KEY_CFBundleVersion: "50"
+        MARKETING_VERSION: 0.5.1
+        CURRENT_PROJECT_VERSION: 51
+        INFOPLIST_KEY_CFBundleShortVersionString: "0.5.1"
+        INFOPLIST_KEY_CFBundleVersion: "51"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDevelopmentRegion: ru
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen

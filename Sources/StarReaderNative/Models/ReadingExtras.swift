@@ -52,6 +52,7 @@ struct ReaderBookmark: Identifiable, Hashable {
     let quote: String
     let note: String
     let createdAt: String
+    let needsReview: Bool
 
     static func parse(_ value: [String: Any]) -> ReaderBookmark? {
         guard let id = value["id"] as? String, !id.isEmpty,
@@ -63,7 +64,8 @@ struct ReaderBookmark: Identifiable, Hashable {
             title: value["title"] as? String ?? "Закладка",
             quote: value["quote"] as? String ?? "",
             note: value["note"] as? String ?? "",
-            createdAt: value["createdAt"] as? String ?? ""
+            createdAt: value["createdAt"] as? String ?? "",
+            needsReview: value["needsReview"] as? Bool ?? false
         )
     }
 }

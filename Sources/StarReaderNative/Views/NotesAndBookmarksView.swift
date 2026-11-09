@@ -177,6 +177,11 @@ struct NotesAndBookmarksView: View {
                         .tracking(1.2)
                         .foregroundStyle(categoryColor(item.categoryTitle))
                     Spacer(minLength: 0)
+                    if item.status == "needs_review" {
+                        Label("Требует проверки", systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.orange)
+                    }
                     if chapter == nil {
                         Label("Нет главы", systemImage: "archivebox")
                             .font(.system(size: 10, weight: .medium))
@@ -233,6 +238,11 @@ struct NotesAndBookmarksView: View {
                     .frame(width: 27)
 
                 VStack(alignment: .leading, spacing: 7) {
+                    if item.needsReview {
+                        Label("Требует проверки", systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.orange)
+                    }
                     Text(item.title)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(palette.text)

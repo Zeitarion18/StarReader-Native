@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct ReaderEditRequest: Identifiable {
+    let id = UUID()
+    let selection: ReaderTextSelection?
+}
+
 private struct ParagraphFramesKey: PreferenceKey {
     static var defaultValue: [Int: CGFloat] = [:]
     static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
@@ -10,8 +15,18 @@ private struct ParagraphFramesKey: PreferenceKey {
 struct ReaderView: View {
     @Environment(\.readerPalette) private var palette
     @ObservedObject var store: LibraryStore
-    let chapter: LibraryChapter
-    var jump: ReaderJump? = nil
+    private let initialChapter: LibraryChapter
+    let jump: ReaderJump?
+
+    init(store: LibraryStore, chapter: LibraryChapter, jump: ReaderJump? = nil) {
+        self.store = store
+        self.initialChapter = chapter
+        self.jump = jump
+    }
+
+    private var chapter: LibraryChapter {
+        store.chapter(for: initialChapter.id) ?? initialChapter
+    }
 
     @AppStorage("starreader.fontSize") private var fontSize: Double = 17
     @AppStorage("starreader.lineSpacing") private var lineSpacing: Double = 4
@@ -35,6 +50,8 @@ struct ReaderView: View {
     @State private var selectedAnnotation: ReaderAnnotation?
     @State private var selectedText: ReaderTextSelection?
     @State private var composingSelection: ReaderTextSelection?
+    @State private var editorRequest: ReaderEditRequest?
+    @State private var lastEditMessage: String?
 
     private var pageBackground: Color { palette.background }
 
@@ -76,6 +93,19 @@ struct ReaderView: View {
                     hasRestoredScroll = false
                     hasScrolled = false
                     selectedText = nil
+                    rebuildPagination(for: geometry.size, force: true)
+                }
+                .onChange(of: chapter) { _, _ in
+                    // The editor has replaced the JSON, but the reader's
+                    // NavigationLink may still hold the original value.
+                    // Re-measure using the live chapter with mapped progress.
+                    let progress = store.progress(for: chapter.id)
+                    currentParagraph = progress.paragraph
+                    currentOffset = progress.offset
+                    nativePlan = nil
+                    pagination = nil
+                    hasRestoredScroll = false
+                    hasScrolled = false
                     rebuildPagination(for: geometry.size, force: true)
                 }
                 .onChange(of: store.annotations) { _, _ in
@@ -125,6 +155,16 @@ struct ReaderView: View {
                 .accessibilityLabel("Добавить закладку")
 
                 Button {
+                    editorRequest = ReaderEditRequest(selection: nil)
+                } label: {
+                    Image(systemName: "pencil.line")
+                }
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
+                .accessibilityHidden(!controlsVisible)
+                .accessibilityLabel("Редактировать главу")
+
+                Button {
                     showReaderSettings = true
                 } label: {
                     Image(systemName: "textformat.size")
@@ -166,6 +206,30 @@ struct ReaderView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $editorRequest) { request in
+            ChapterEditorSheet(
+                store: store,
+                chapterID: chapter.id,
+                selection: request.selection
+            ) { result in
+                let noteCount = result.notesNeedingReview
+                let bookmarkCount = result.bookmarksNeedingReview
+                lastEditMessage = "Глава сохранена. " +
+                    "Требуют проверки: (noteCount) замечаний, " +
+                    "(bookmarkCount) закладок."
+            }
+        }
+        .alert(
+            "Изменения сохранены",
+            isPresented: Binding(
+                get: { lastEditMessage != nil },
+                set: { if !$0 { lastEditMessage = nil } }
+            )
+        ) {
+            Button("Отлично", role: .cancel) { lastEditMessage = nil }
+        } message: {
+            Text(lastEditMessage ?? "")
+        }
         .sheet(item: $composingSelection) { selection in
             AnnotationComposerView(selection: selection) { kind, note in
                 let saved = store.addAnnotation(
@@ -204,6 +268,9 @@ struct ReaderView: View {
                         },
                         onMakeNote: { selection in
                             composingSelection = selection
+                        },
+                        onEditSelection: { selection in
+                            editorRequest = ReaderEditRequest(selection: selection)
                         }
                     )
                     .frame(
@@ -465,6 +532,7 @@ struct ReaderView: View {
 
     private func annotations(at index: Int) -> [ReaderAnnotation] {
         linkedAnnotations.filter { note in
+            guard note.status != "needs_review" else { return false }
             let end = max(note.paragraph, note.endParagraph ?? note.paragraph)
             return note.paragraph <= index && index <= end
         }

@@ -113,6 +113,7 @@ struct NativeSelectablePage: UIViewRepresentable {
     let onTurn: (Int) -> Void
     let onTapCenter: () -> Void
     let onMakeNote: (ReaderTextSelection) -> Void
+    let onEditSelection: (ReaderTextSelection) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -189,6 +190,7 @@ struct NativeSelectablePage: UIViewRepresentable {
         coordinator.onTurn = onTurn
         coordinator.onTapCenter = onTapCenter
         coordinator.onMakeNote = onMakeNote
+        coordinator.onEditSelection = onEditSelection
         coordinator.plan = plan
         view.backgroundColor = palette.uiBackground
         view.textColor = palette.uiText
@@ -216,6 +218,7 @@ struct NativeSelectablePage: UIViewRepresentable {
         var onTurn: ((Int) -> Void)?
         var onTapCenter: (() -> Void)?
         var onMakeNote: ((ReaderTextSelection) -> Void)?
+        var onEditSelection: ((ReaderTextSelection) -> Void)?
 
         func textView(
             _ textView: UITextView,
@@ -240,7 +243,13 @@ struct NativeSelectablePage: UIViewRepresentable {
             ) { [weak self] _ in
                 self?.onMakeNote?(selection)
             }
-            return UIMenu(children: [makeNote] + suggestedActions)
+            let editText = UIAction(
+                title: "Изменить",
+                image: UIImage(systemName: "pencil")
+            ) { [weak self] _ in
+                self?.onEditSelection?(selection)
+            }
+            return UIMenu(children: [editText, makeNote] + suggestedActions)
         }
 
         @objc func swipe(_ recognizer: UISwipeGestureRecognizer) {
