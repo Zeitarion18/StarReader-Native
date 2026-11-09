@@ -114,6 +114,9 @@ struct NativeSelectablePage: UIViewRepresentable {
     let onTapCenter: () -> Void
     let onMakeNote: (ReaderTextSelection) -> Void
     let onEditSelection: (ReaderTextSelection) -> Void
+    let pendingReanchorID: String?
+    let onReanchorSelection: (ReaderTextSelection) -> Void
+    let onTapAnnotation: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -191,6 +194,9 @@ struct NativeSelectablePage: UIViewRepresentable {
         coordinator.onTapCenter = onTapCenter
         coordinator.onMakeNote = onMakeNote
         coordinator.onEditSelection = onEditSelection
+        coordinator.pendingReanchorID = pendingReanchorID
+        coordinator.onReanchorSelection = onReanchorSelection
+        coordinator.onTapAnnotation = onTapAnnotation
         coordinator.plan = plan
         view.backgroundColor = palette.uiBackground
         view.textColor = palette.uiText
@@ -219,6 +225,9 @@ struct NativeSelectablePage: UIViewRepresentable {
         var onTapCenter: (() -> Void)?
         var onMakeNote: ((ReaderTextSelection) -> Void)?
         var onEditSelection: ((ReaderTextSelection) -> Void)?
+        var pendingReanchorID: String?
+        var onReanchorSelection: ((ReaderTextSelection) -> Void)?
+        var onTapAnnotation: ((String) -> Void)?
 
         func textView(
             _ textView: UITextView,
@@ -249,7 +258,19 @@ struct NativeSelectablePage: UIViewRepresentable {
             ) { [weak self] _ in
                 self?.onEditSelection?(selection)
             }
-            return UIMenu(children: [editText, makeNote] + suggestedActions)
+            var actions: [UIMenuElement] = [editText, makeNote]
+            if pendingReanchorID != nil {
+                actions.insert(
+                    UIAction(
+                        title: "Привязать замечание",
+                        image: UIImage(systemName: "scope")
+                    ) { [weak self] _ in
+                        self?.onReanchorSelection?(selection)
+                    },
+                    at: 0
+                )
+            }
+            return UIMenu(children: actions + suggestedActions)
         }
 
         @objc func swipe(_ recognizer: UISwipeGestureRecognizer) {
@@ -261,7 +282,33 @@ struct NativeSelectablePage: UIViewRepresentable {
         @objc func tap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let view,
                   view.selectedRange.length == 0 else { return }
-            let x = recognizer.location(in: view).x
+            let touch = recognizer.location(in: view)
+            let local = CGPoint(
+                x: touch.x - view.textContainerInset.left + view.contentOffset.x,
+                y: touch.y - view.textContainerInset.top + view.contentOffset.y
+            )
+            let layout = view.layoutManager
+            if layout.numberOfGlyphs > 0 {
+                let glyph = layout.glyphIndex(
+                    for: local, in: view.textContainer
+                )
+                if glyph < layout.numberOfGlyphs {
+                    let glyphRect = layout.boundingRect(
+                        forGlyphRange: NSRange(location: glyph, length: 1),
+                        in: view.textContainer
+                    )
+                    if glyphRect.insetBy(dx: -5, dy: -4).contains(local) {
+                        let globalOffset = chapterStart + layout.characterIndexForGlyph(at: glyph)
+                        if let note = plan?.source.noteHitTargets.first(
+                            where: { NSLocationInRange(globalOffset, $0.range) }
+                        ) {
+                            onTapAnnotation?(note.id)
+                            return
+                        }
+                    }
+                }
+            }
+            let x = touch.x
             if x < view.bounds.width * 0.19 {
                 onTurn?(-1)
             } else if x > view.bounds.width * 0.81 {

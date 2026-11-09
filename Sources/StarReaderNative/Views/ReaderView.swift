@@ -191,7 +191,7 @@ struct ReaderView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $selectedAnnotation) { item in
-            annotationSheet(item)
+            AnnotationDetailsSheet(store: store, annotationID: item.id)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -204,8 +204,8 @@ struct ReaderView: View {
                 let noteCount = result.notesNeedingReview
                 let bookmarkCount = result.bookmarksNeedingReview
                 lastEditMessage = "Глава сохранена. " +
-                    "Требуют проверки: (noteCount) замечаний, " +
-                    "(bookmarkCount) закладок."
+                    "Требуют проверки: \(noteCount) замечаний, " +
+                    "\(bookmarkCount) закладок."
             }
         }
         .alert(
@@ -260,6 +260,22 @@ struct ReaderView: View {
                         },
                         onEditSelection: { selection in
                             editorRequest = ReaderEditRequest(selection: selection)
+                        },
+                        pendingReanchorID: store.pendingAnnotationReanchor?.bookId == chapter.id
+                            ? store.pendingAnnotationReanchorID : nil,
+                        onReanchorSelection: { selection in
+                            guard let pending = store.pendingAnnotationReanchor,
+                                  pending.bookId == chapter.id else { return }
+                            if store.reattachAnnotation(
+                                id: pending.id, chapter: chapter, selection: selection
+                            ) {
+                                selectedAnnotation = store.annotations.first(where: {
+                                    $0.id == pending.id
+                                })
+                            }
+                        },
+                        onTapAnnotation: { id in
+                            selectedAnnotation = store.annotations.first(where: { $0.id == id })
                         }
                     )
                     .frame(
@@ -492,7 +508,7 @@ struct ReaderView: View {
         guard length > 0 else { return Text(" ") }
 
         var boundaries = Set([0, length])
-        var ranges: [(Int, Int)] = []
+        var ranges: [(Int, Int, Color)] = []
         for note in annotations(at: paragraph.index) {
             let last = max(note.paragraph, note.endParagraph ?? note.paragraph)
             let lower = min(max(0, paragraph.index == note.paragraph ? note.start : 0), length)
@@ -500,7 +516,7 @@ struct ReaderView: View {
             guard lower < upper else { continue }
             boundaries.insert(lower)
             boundaries.insert(upper)
-            ranges.append((lower, upper))
+            ranges.append((lower, upper, noteHighlightColor(note)))
         }
 
         let cuts = boundaries.sorted()
@@ -511,8 +527,8 @@ struct ReaderView: View {
             let content = String(String.UnicodeScalarView(scalars[lower..<upper]))
             var fragment = AttributedString(content)
             fragment.foregroundColor = palette.text.opacity(0.93)
-            if ranges.contains(where: { $0.0 <= lower && $0.1 >= upper }) {
-                fragment.backgroundColor = palette.noteTint
+            if let match = ranges.first(where: { $0.0 <= lower && $0.1 >= upper }) {
+                fragment.backgroundColor = match.2
             }
             result.append(fragment)
         }
@@ -524,6 +540,17 @@ struct ReaderView: View {
             guard note.status != "needs_review" else { return false }
             let end = max(note.paragraph, note.endParagraph ?? note.paragraph)
             return note.paragraph <= index && index <= end
+        }
+    }
+
+    private func noteHighlightColor(_ item: ReaderAnnotation) -> Color {
+        switch item.color {
+        case "gold": return Color.yellow.opacity(0.23)
+        case "coral": return Color.red.opacity(0.21)
+        case "blue": return Color.blue.opacity(0.22)
+        case "mint": return Color.mint.opacity(0.24)
+        case "purple": return Color.purple.opacity(0.22)
+        default: return palette.noteTint
         }
     }
 

@@ -160,6 +160,73 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    // MARK: - Advanced annotations (v0.5.2)
+
+    /// Transient UI intent only. Never persisted as a new annotation or
+    /// written into the chapter, so leaving the reader cannot corrupt notes.
+    @Published var pendingAnnotationReanchorID: String?
+
+    var pendingAnnotationReanchor: ReaderAnnotation? {
+        guard let id = pendingAnnotationReanchorID else { return nil }
+        return annotations.first(where: { $0.id == id && $0.status == "needs_review" })
+    }
+
+    @discardableResult
+    func updateAnnotation(id: String, kind: String, note: String, color: String) -> Bool {
+        changeAnnotation(.update(id: id, kind: kind, note: note, color: color))
+    }
+
+    @discardableResult
+    func deleteAnnotation(id: String) -> Bool {
+        changeAnnotation(.remove(id: id))
+    }
+
+    @discardableResult
+    func reattachAnnotation(
+        id: String, chapter: LibraryChapter, selection: ReaderTextSelection
+    ) -> Bool {
+        let success = changeAnnotation(
+            .reattach(id: id, chapterID: chapter.id,
+                      selection: selection, chapter: chapter)
+        )
+        if success { pendingAnnotationReanchorID = nil }
+        return success
+    }
+
+    private func changeAnnotation(_ action: AnnotationOperations.Action) -> Bool {
+        do {
+            let previous = try JSONSerialization.data(
+                withJSONObject: stateObject, options: [.prettyPrinted, .sortedKeys]
+            )
+            let updated = try AnnotationOperations.apply(previous, action: action)
+            let backup = rootURL
+                .appendingPathComponent("Notes", isDirectory: true)
+                .appendingPathComponent(
+                    "BeforeNote-" + UUID().uuidString, isDirectory: true
+                )
+            try FileManager.default.createDirectory(
+                at: backup, withIntermediateDirectories: true
+            )
+            try previous.write(
+                to: backup.appendingPathComponent("preview_state.json"),
+                options: .atomic
+            )
+            // Update memory only after an atomic disk write succeeds.
+            try updated.write(to: stateURL, options: .atomic)
+            guard let parsed = try JSONSerialization.jsonObject(
+                with: updated
+            ) as? [String: Any] else {
+                throw AnnotationOperations.Failure.invalidState
+            }
+            stateObject = parsed
+            loadRecordCollections()
+            return true
+        } catch {
+            statusMessage = "Замечание не изменено: " + error.localizedDescription
+            return false
+        }
+    }
+
     // MARK: - On-device backup and export
 
     /// Build the ZIP outside the main actor so large libraries do not stall

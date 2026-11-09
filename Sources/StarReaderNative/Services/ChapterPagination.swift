@@ -23,6 +23,7 @@ final class ChapterPagination {
     let chapters: [ChapterPage]
     let attributedText: NSAttributedString
     let highlightRanges: [NSRange]
+    let noteHitTargets: [(range: NSRange, id: String)]
     let framesetter: CTFramesetter
     let pageWidth: CGFloat
     let pageHeight: CGFloat
@@ -80,6 +81,7 @@ final class ChapterPagination {
         var spans: [ChapterParagraphSpan] = []
         var scalarCounts: [Int] = []
         var noteHighlights: [NSRange] = []
+        var hitTargets: [(range: NSRange, id: String)] = []
 
         for paragraph in chapter.paragraphs {
             let start = rendered.length
@@ -117,15 +119,26 @@ final class ChapterPagination {
                 )
                 // Telegram-like highlight: readable white glyphs over a
                 // translucent orange tint. No underlines or font changes.
+                let highlight: UIColor
+                switch note.color {
+                case "gold": highlight = UIColor.systemYellow.withAlphaComponent(0.23)
+                case "coral": highlight = UIColor.systemRed.withAlphaComponent(0.21)
+                case "blue": highlight = UIColor.systemBlue.withAlphaComponent(0.22)
+                case "mint": highlight = UIColor.systemMint.withAlphaComponent(0.24)
+                case "purple": highlight = UIColor.systemPurple.withAlphaComponent(0.22)
+                default: highlight = palette.uiNoteTint
+                }
                 segment.addAttribute(
                     .backgroundColor,
-                    value: palette.uiNoteTint,
+                    value: highlight,
                     range: localRange
                 )
-                noteHighlights.append(NSRange(
+                let mappedRange = NSRange(
                     location: start + localRange.location,
                     length: localRange.length
-                ))
+                )
+                noteHighlights.append(mappedRange)
+                hitTargets.append((range: mappedRange, id: note.id))
             }
 
             rendered.append(segment)
@@ -141,6 +154,7 @@ final class ChapterPagination {
         paragraphs = spans
         paragraphScalarCounts = scalarCounts
         highlightRanges = noteHighlights
+        noteHitTargets = hitTargets
         attributedText = rendered.copy() as! NSAttributedString
         framesetter = CTFramesetterCreateWithAttributedString(attributedText as CFAttributedString)
 

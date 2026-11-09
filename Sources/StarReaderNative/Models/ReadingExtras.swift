@@ -12,6 +12,7 @@ struct ReaderAnnotation: Identifiable, Hashable {
     let kind: String
     let quote: String
     let note: String
+    let color: String
     let status: String
     let createdAt: String
 
@@ -37,6 +38,7 @@ struct ReaderAnnotation: Identifiable, Hashable {
             kind: value["kind"] as? String ?? "",
             quote: value["quote"] as? String ?? "",
             note: value["note"] as? String ?? "",
+            color: value["color"] as? String ?? "default",
             status: value["status"] as? String ?? "open",
             createdAt: value["createdAt"] as? String ?? ""
         )
