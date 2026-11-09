@@ -1,0 +1,337 @@
+name: Build unsigned iOS IPA
+
+on:
+  push:
+    branches:
+      - main
+      - n0-swiftui-preview
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Collapse redundant push/PR builds while iterating on the same branch.
+concurrency:
+  group: reader-native-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate native app icon
+        run: swift .ci/generate_icon.swift
+
+      - name: Verify selected glass icon
+        run: |
+          test "$(shasum -a 256 Art/StarReader-Glass-Icon.jpg | awk '{print $1}')" = "03267c3555bdc2f938e41f0cd1022912f9e376986a4f2bacede92666c1a933a7"
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          icon = Path("Sources/StarReaderNative/Assets.xcassets/AppIcon.appiconset/icon.png")
+          assert icon.exists() and icon.stat().st_size > 20000, "AppIcon not generated"
+          info = subprocess.check_output(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(icon)], text=True)
+          assert "pixelWidth: 1024" in info and "pixelHeight: 1024" in info, info
+          assert "Art/StarReader-Glass-Icon.jpg" in Path(".ci/generate_icon.swift").read_text()
+          print("PASS: glass icon selected, 1024px asset generated.")
+          PY
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project StarReaderNative.xcodeproj -scheme StarReaderNative
+
+      - name: Build unsigned iOS app
+        run: |
+          xcodebuild \
+            -project StarReaderNative.xcodeproj \
+            -scheme StarReaderNative \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify app identity and release version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import plistlib
+          path = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Info.plist")
+          with path.open("rb") as file:
+              info = plistlib.load(file)
+          assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
+          assert info.get("CFBundleShortVersionString") == "0.5.2", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "55", info.get("CFBundleVersion")
+          launch = info.get("UILaunchStoryboardName")
+          assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
+          app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
+          storyboards = list(app_bundle.rglob("LaunchScreen.storyboardc"))
+          assert any(p.is_dir() for p in storyboards), f"Compiled LaunchScreen.storyboardc missing: {storyboards!r}"
+          icon = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Assets.car")
+          assert icon.exists(), "Compiled asset catalog missing"
+          print("Verified Bundle ID, version, AppIcon and adaptive compiled LaunchScreen.")
+          PY
+
+      - name: Verify stable pagination viewport
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          assert ".toolbar(.visible, for: .navigationBar)" in source, "Reader navigation bar must always reserve its space"
+          assert ".toolbar(controlsVisible ? .visible : .hidden, for: .navigationBar)" not in source, "Hiding navigation bar invalidates pagination"
+          assert ".frame(height: 29)" in source, "Always-visible info row must retain its fixed height"
+          print("Verified stable navigation footprint and 29pt footer.")
+          PY
+
+      - name: Verify Liquid Glass toolbar fully disappears in reading mode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          toolbar = src.split("        .toolbar {", 1)[1].split(
+              "        // Never toggle .hidden for the navigation bar.", 1
+          )[0]
+          assert "if controlsVisible {" in toolbar
+          assert "ToolbarItem(placement: .topBarLeading)" in toolbar
+          assert "ToolbarItemGroup(placement: .topBarTrailing)" in toolbar
+          assert toolbar.index("if controlsVisible {") < toolbar.index("ToolbarItem(")
+          assert ".opacity(controlsVisible ? 1 : 0)" not in toolbar
+          assert ".allowsHitTesting(controlsVisible)" not in toolbar
+          assert ".toolbar(.visible, for: .navigationBar)" in src
+          assert ".toolbarBackground(pageBackground, for: .navigationBar)" in src
+          assert ".navigationTitle(controlsVisible ? chapter.displayTitle : \"\")" in src
+          print("PASS: hidden reading mode removes both Liquid Glass toolbar groups.")
+          PY
+
+      - name: Verify system-native text selection
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          assert "UITextView" in native
+          assert "isSelectable = true" in native
+          assert "editMenuForTextIn range: NSRange" in native
+          assert "NativeSelectablePage(" in reader
+          assert "CoreTextPage(" not in reader
+          assert "isScrollEnabled = true" in native, "UITextView needs scroll-enabled layout for word wrapping"
+          assert "panGestureRecognizer.isEnabled = false" in native, "Disable free vertical dragging"
+          assert "abs(textContainer.size.width - width)" in native, "Constrain TextKit to the visible page width"
+          assert "setContentOffset(.zero, animated: false)" in native, "Always display each page from its own top"
+          assert "attributedSubstring(from: range(at: page))" in native, "Pages must use disjoint UTF-16 slices"
+          assert "chapterStart + range.location" in native, "Selections must use chapter-global offsets"
+          assert "highlightRanges" in native and "setNoteRanges" in native, "Preserve visible annotation rails"
+          assert ".toolbar(.visible, for: .navigationBar)" in reader
+          assert ".frame(height: 29)" in reader
+          print("Native iOS selection, same-engine pagination and stable status footer verified.")
+          PY
+
+      - name: Test chapter and volume deletion without data loss
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Services/LibraryDeletion.swift \
+            Tests/LibraryDeletionSmoke.swift \
+            -o /tmp/starreader-library-deletion-tests
+          /tmp/starreader-library-deletion-tests
+
+      - name: Verify persisted themes across SwiftUI and TextKit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          theme = Path("Sources/StarReaderNative/Models/ReaderColorTheme.swift").read_text()
+          app = Path("Sources/StarReaderNative/StarReaderNativeApp.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          chapter = Path("Sources/StarReaderNative/Services/ChapterPagination.swift").read_text()
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          for name in ("dark", "twilight", "light", "sepia", "oled"):
+              assert name in theme, name
+          assert '@AppStorage("starreader.colorTheme")' in app
+          assert '.environment(\\.readerPalette, theme.palette)' in app
+          assert 'colorThemeID: $colorThemeID' in reader
+          assert 'palette.uiText' in chapter and 'palette.uiNoteTint' in chapter
+          assert 'view.backgroundColor = palette.uiBackground' in native
+          assert 'view.configureNoteColor(palette.uiNoteRail)' in native
+          assert 'ReaderTheme.' not in reader
+          assert '.preferredColorScheme(.dark)' not in app
+          print("PASS: five persistent themes, TextKit colors, SwiftUI palette.")
+          PY
+
+      - name: Test safe single-chapter JSON append
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Services/ChapterLibraryMutation.swift \
+            Tests/ChapterLibraryMutationSmoke.swift \
+            -o /tmp/starreader-docx-mutation-tests
+          /tmp/starreader-docx-mutation-tests
+
+      - name: Verify DOCX importer and in-app picker
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          parser = Path("Sources/StarReaderNative/Services/SingleDocxImporter.swift").read_text()
+          sheet = Path("Sources/StarReaderNative/Views/DocxChapterImportSheet.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          assert 'word/document.xml' in parser
+          assert 'shouldResolveExternalEntities = false' in parser
+          assert 'maxDocxBytes' in parser and 'maxXMLBytes' in parser
+          assert 'showDuplicateConfirmation' in sheet
+          assert 'allowDuplicate: true' in sheet
+          assert 'DocxChapterImportSheet(store: store' in library
+          assert 'isDocxPickerPresented' in library
+          assert 'try newLibraryData.write(to: libraryURL, options: .atomic)' in store
+          assert 'oldLibraryData.write(' in store
+          assert 'document.originalData.write' in store
+          print('DOCX picker, duplicate consent, backup, atomic JSON and XML limits present.')
+          PY
+
+      - name: Check backup export and responsive page counts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          backup = Path("Sources/StarReaderNative/Services/LibraryBackupExporter.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          counter = Path("Sources/StarReaderNative/Services/ReaderPageCounter.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+
+          # The export must use the SAME manifest/schema and checksum
+          # format as the existing Qt Transfer importer.
+          assert "starreader-qt-library-transfer" in backup
+          assert "starreader-library-manifest.json" in backup
+          assert "data/qt_library.json" in backup
+          assert "data/preview_state.json" in backup
+          assert "SHA256.hash(data: data)" in backup
+          assert "TransferImporter.read(from: archiveURL)" in backup
+          assert "ExportError.missingOriginal" in backup
+          assert "let directory = rootURL" in store
+          assert "func exportBackup()" in store
+          assert "StarReaderBackupShareSheet" in library
+
+          # Totals must be based on identical TextKit pagination and be
+          # invalidated on changes to the library and reader typography.
+          assert "NativeTextPagePlan(" in counter
+          assert "ChapterPagination(" in counter
+          assert "String(chapters.hashValue)" in counter
+          assert "onChange(of: store.snapshot.chapters)" in library
+          assert "onChange(of: fontSize)" in library
+          assert "onChange(of: measuredPageHeight)" in library
+          assert "pageCounter.totalText(" in library
+          assert "starreader.lastPageContentWidth" in reader
+          assert "starreader.lastPageHeight" in reader
+          print("Backup/restore compatibility and dynamic page totals wiring validated.")
+          PY
+
+      - name: Test chapter edits, annotation safety and backups
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/LibraryModels.swift \
+            Sources/StarReaderNative/Models/ReaderTextSelection.swift \
+            Sources/StarReaderNative/Services/ChapterEditing.swift \
+            Tests/ChapterEditingSmoke.swift \
+            -o /tmp/starreader-editor-tests
+          /tmp/starreader-editor-tests
+
+      - name: Verify editor is wired into the native reader
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          editor = Path("Sources/StarReaderNative/Views/ChapterEditorSheet.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          notes = Path("Sources/StarReaderNative/Views/NotesAndBookmarksView.swift").read_text()
+          assert 'title: "Изменить"' in native
+          assert 'onEditSelection' in native and 'onEditSelection:' in reader
+          assert 'ChapterEditorSheet(' in reader
+          assert 'store.chapter(for: initialChapter.id)' in reader
+          assert 'onChange(of: chapter)' in reader
+          assert 'previewChapterEdits(' in store and 'saveChapterEdits(' in store
+          assert 'BeforeEdit-' in store
+          assert 'oldLibrary.write(to: libraryURL, options: .atomic)' in store
+          assert 'Отменить правки' in editor and 'showDiscardWarning' in editor
+          assert 'needs_review' in notes and 'needsReview' in notes
+          print('PASS: native quick edit, full editor, live chapter reload, backed-up JSON.')
+          PY
+
+      - name: Test safe annotation editing, deletion and reattachment
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/LibraryModels.swift \
+            Sources/StarReaderNative/Models/ReaderTextSelection.swift \
+            Sources/StarReaderNative/Services/AnnotationOperations.swift \
+            Tests/AnnotationOperationsSmoke.swift \
+            -o /tmp/starreader-annotation-tests
+          /tmp/starreader-annotation-tests
+
+      - name: Verify notes filters, selection actions and highlighted-tap routing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          list_view = Path("Sources/StarReaderNative/Views/NotesAndBookmarksView.swift").read_text()
+          detail = Path("Sources/StarReaderNative/Views/AnnotationDetailsSheet.swift").read_text()
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          paginate = Path("Sources/StarReaderNative/Services/ChapterPagination.swift").read_text()
+          assert 'BeforeNote-' in store
+          assert 'try previous.write(' in store
+          assert 'try updated.write(to: stateURL, options: .atomic)' in store
+          for entry in ('categoryFilter', 'statusFilter', 'workFilter',
+                        'volumeFilter', 'chapterFilter'):
+              assert entry in list_view, entry
+          for text in ('Сохранить изменения', 'Удалить замечание',
+                       'Выбрать новое место в главе'):
+              assert text in detail, text
+          assert 'title: "Привязать замечание"' in native
+          assert 'onTapAnnotation' in native
+          assert 'noteHitTargets' in native and 'noteHitTargets' in paginate
+          assert 'AnnotationDetailsSheet(store: store' in reader
+          assert 'onReanchorSelection:' in reader and 'onTapAnnotation:' in reader
+          assert 'fragment.backgroundColor = match.2' in reader
+          print('PASS: filters, editing sheet, backup, tap to edit, reanchoring and colors.')
+          PY
+
+      - name: Verify note and bookmark jumps use direct navigation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          list_view = Path("Sources/StarReaderNative/Views/NotesAndBookmarksView.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          assert list_view.count("NavigationLink {") >= 2, "Direct note/bookmark links missing"
+          assert list_view.count("jump: ReaderJump(") == 2, "Expected two position-aware links"
+          assert "NavigationLink(\n                    value: ReaderJump(" not in list_view
+          assert ".navigationDestination(for: ReaderJump.self)" not in list_view
+          assert ".navigationDestination(isPresented: $isRecordsPresented)" in library
+          assert "ReaderView(store: store, chapter: chapter)" in library
+          assert "jump?.paragraph ?? saved.paragraph" in reader
+          assert "jump?.offset ?? saved.offset" in reader
+          assert "native.page(for: targetParagraph, offset: targetOffset)" in reader
+          print("PASS: both record jumps open ReaderView directly with precise saved offsets.")
+          PY
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/StarReaderNative.app Payload/
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload StarReaderNative-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarReaderNative-unsigned-ipa
+          path: StarReaderNative-unsigned.ipa
+          if-no-files-found: error
