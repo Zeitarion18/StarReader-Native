@@ -28,6 +28,20 @@ jobs:
       - name: Generate native app icon
         run: swift .ci/generate_icon.swift
 
+      - name: Verify selected glass icon
+        run: |
+          test "$(shasum -a 256 Art/StarReader-Glass-Icon.jpg | awk '{print $1}')" = "03267c3555bdc2f938e41f0cd1022912f9e376986a4f2bacede92666c1a933a7"
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          icon = Path("Sources/StarReaderNative/Assets.xcassets/AppIcon.appiconset/icon.png")
+          assert icon.exists() and icon.stat().st_size > 20000, "AppIcon not generated"
+          info = subprocess.check_output(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(icon)], text=True)
+          assert "pixelWidth: 1024" in info and "pixelHeight: 1024" in info, info
+          assert "Art/StarReader-Glass-Icon.jpg" in Path(".ci/generate_icon.swift").read_text()
+          print("PASS: glass icon selected, 1024px asset generated.")
+          PY
+
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
@@ -58,7 +72,7 @@ jobs:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
           assert info.get("CFBundleShortVersionString") == "0.5.1", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "51", info.get("CFBundleVersion")
+          assert info.get("CFBundleVersion") == "52", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")

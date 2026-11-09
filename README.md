@@ -2,6 +2,13 @@
 
 Нативная iOS-читалка на **SwiftUI**, которая заменяет прежнее приложение StarReader при установке поверх него.
 
+## Иконка — вариант № 2 (glassmorphism)
+
+По выбору пользователя установлена стеклянная книга со светящейся звездой
+на сине-фиолетовом фоне. Исходная иллюстрация в Art/StarReader-Glass-Icon.jpg,
+а .ci/generate_icon.swift собирает из неё 1024×1024 AppIcon для iOS.
+Версия 0.5.1, Build 52. Сохранён Bundle ID dev.starreader.personalreader;
+все функции редактора глав 0.5.1 остались неизменными.
 ## Принципы
 
 - Нативный интерфейс SwiftUI; без WKWebView, HTML, CSS, JavaScript или Capacitor.
