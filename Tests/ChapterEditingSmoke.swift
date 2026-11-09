@@ -41,7 +41,7 @@ enum ChapterEditingSmoke {
                  "start": 0, "endPara": 0, "end": 6,
                  "quote": "Первый", "status": "open"],
                 ["id": "note-inside", "bookId": "ch1", "para": 1,
-                 "start": 18, "endPara": 1, "end": 30,
+                 "start": 14, "endPara": 1, "end": 27,
                  "quote": "неправильный меч", "status": "open"],
                 ["id": "note-after", "bookId": "ch1", "para": 2,
                  "start": 0, "endPara": 2, "end": 9,
