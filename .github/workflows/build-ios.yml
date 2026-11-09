@@ -72,7 +72,7 @@ jobs:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
           assert info.get("CFBundleShortVersionString") == "0.5.2", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "54", info.get("CFBundleVersion")
+          assert info.get("CFBundleVersion") == "55", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -301,6 +301,26 @@ jobs:
           assert 'onReanchorSelection:' in reader and 'onTapAnnotation:' in reader
           assert 'fragment.backgroundColor = match.2' in reader
           print('PASS: filters, editing sheet, backup, tap to edit, reanchoring and colors.')
+          PY
+
+      - name: Verify note and bookmark jumps use direct navigation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          list_view = Path("Sources/StarReaderNative/Views/NotesAndBookmarksView.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          assert list_view.count("NavigationLink {") >= 2, "Direct note/bookmark links missing"
+          assert list_view.count("jump: ReaderJump(") == 2, "Expected two position-aware links"
+          assert "NavigationLink(\n                    value: ReaderJump(" not in list_view
+          assert ".navigationDestination(for: ReaderJump.self)" not in list_view
+          assert ".navigationDestination(isPresented: $isRecordsPresented)" in library
+          assert "ReaderView(store: store, chapter: chapter)" in library
+          assert "jump?.paragraph ?? saved.paragraph" in reader
+          assert "jump?.offset ?? saved.offset" in reader
+          assert "native.page(for: targetParagraph, offset: targetOffset)" in reader
+          print("PASS: both record jumps open ReaderView directly with precise saved offsets.")
           PY
 
       - name: Package unsigned IPA

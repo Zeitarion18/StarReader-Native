@@ -159,14 +159,18 @@ struct NotesAndBookmarksView: View {
                         LazyVStack(spacing: 11) {
                             ForEach(visibleBookmarks) { item in
                                 if let chapter = store.chapter(for: item.bookId) {
-                                    NavigationLink(
-                                        value: ReaderJump(
-                                            bookID: chapter.id,
-                                            paragraph: item.paragraph,
-                                            offset: item.offset,
-                                            recordID: item.id
+                                    NavigationLink {
+                                        ReaderView(
+                                            store: store,
+                                            chapter: chapter,
+                                            jump: ReaderJump(
+                                                bookID: chapter.id,
+                                                paragraph: item.paragraph,
+                                                offset: item.offset,
+                                                recordID: item.id
+                                            )
                                         )
-                                    ) {
+                                    } label: {
                                         bookmarkCard(item, chapter: chapter)
                                     }
                                     .buttonStyle(.plain)
@@ -203,13 +207,6 @@ struct NotesAndBookmarksView: View {
         }
         .onChange(of: volumeFilter) { _, _ in
             chapterFilter = "all"
-        }
-        .navigationDestination(for: ReaderJump.self) { jump in
-            if let chapter = store.chapter(for: jump.bookID) {
-                ReaderView(store: store, chapter: chapter, jump: jump)
-            } else {
-                ContentUnavailableView("Глава отсутствует", systemImage: "archivebox")
-            }
         }
         .toolbarBackground(palette.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -267,14 +264,18 @@ struct NotesAndBookmarksView: View {
             .buttonStyle(.plain)
 
             if let chapter = store.chapter(for: item.bookId) {
-                NavigationLink(
-                    value: ReaderJump(
-                        bookID: chapter.id,
-                        paragraph: item.paragraph,
-                        offset: item.start,
-                        recordID: item.id
+                NavigationLink {
+                    ReaderView(
+                        store: store,
+                        chapter: chapter,
+                        jump: ReaderJump(
+                            bookID: chapter.id,
+                            paragraph: item.paragraph,
+                            offset: item.start,
+                            recordID: item.id
+                        )
                     )
-                ) {
+                } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.turn.down.right")
                         Text(item.status == "needs_review"
