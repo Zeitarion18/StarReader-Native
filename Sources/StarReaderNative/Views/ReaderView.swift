@@ -124,65 +124,54 @@ struct ReaderView: View {
             informationFooter
         }
         .background(pageBackground.ignoresSafeArea())
-        // Keep the navigation bar in the layout even when its contents fade.
-        // Hiding the bar itself changes GeometryReader height and repaginates.
+        // Always reserve the navigation-bar height for stable pagination,
+        // but REMOVE toolbar items when controls are hidden. Applying
+        // .opacity(0) hides only their labels, leaving iOS 26 Liquid Glass
+        // button containers visible as empty capsules.
         .navigationTitle(controlsVisible ? chapter.displayTitle : "")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                ReaderBackButton()
-                    .opacity(controlsVisible ? 1 : 0)
-                    .allowsHitTesting(controlsVisible)
-                    .accessibilityHidden(!controlsVisible)
-            }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    store.addBookmark(
-                        for: chapter,
-                        paragraph: currentParagraph,
-                        offset: currentOffset
-                    )
-                } label: {
-                    Image(systemName: store.hasBookmark(
-                        chapterID: chapter.id,
-                        paragraph: currentParagraph
-                    ) ? "bookmark.fill" : "bookmark")
+            if controlsVisible {
+                ToolbarItem(placement: .topBarLeading) {
+                    ReaderBackButton()
                 }
-                .opacity(controlsVisible ? 1 : 0)
-                .allowsHitTesting(controlsVisible)
-                .accessibilityHidden(!controlsVisible)
-                .accessibilityLabel("Добавить закладку")
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        store.addBookmark(
+                            for: chapter,
+                            paragraph: currentParagraph,
+                            offset: currentOffset
+                        )
+                    } label: {
+                        Image(systemName: store.hasBookmark(
+                            chapterID: chapter.id,
+                            paragraph: currentParagraph
+                        ) ? "bookmark.fill" : "bookmark")
+                    }
+                    .accessibilityLabel("Добавить закладку")
 
-                Button {
-                    editorRequest = ReaderEditRequest(selection: nil)
-                } label: {
-                    Image(systemName: "pencil.line")
-                }
-                .opacity(controlsVisible ? 1 : 0)
-                .allowsHitTesting(controlsVisible)
-                .accessibilityHidden(!controlsVisible)
-                .accessibilityLabel("Редактировать главу")
+                    Button {
+                        editorRequest = ReaderEditRequest(selection: nil)
+                    } label: {
+                        Image(systemName: "pencil.line")
+                    }
+                    .accessibilityLabel("Редактировать главу")
 
-                Button {
-                    showReaderSettings = true
-                } label: {
-                    Image(systemName: "textformat.size")
-                }
-                .opacity(controlsVisible ? 1 : 0)
-                .allowsHitTesting(controlsVisible)
-                .accessibilityHidden(!controlsVisible)
-                .accessibilityLabel("Оформление чтения")
+                    Button {
+                        showReaderSettings = true
+                    } label: {
+                        Image(systemName: "textformat.size")
+                    }
+                    .accessibilityLabel("Оформление чтения")
 
-                NavigationLink {
-                    NotesAndBookmarksView(store: store)
-                } label: {
-                    Image(systemName: "text.book.closed")
+                    NavigationLink {
+                        NotesAndBookmarksView(store: store)
+                    } label: {
+                        Image(systemName: "text.book.closed")
+                    }
+                    .accessibilityLabel("Замечания и закладки")
                 }
-                .opacity(controlsVisible ? 1 : 0)
-                .allowsHitTesting(controlsVisible)
-                .accessibilityHidden(!controlsVisible)
-                .accessibilityLabel("Замечания и закладки")
             }
         }
         // Never toggle .hidden for the navigation bar. Its safe-area footprint
@@ -367,9 +356,9 @@ struct ReaderView: View {
     }
 
     private func toggleControls() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            controlsVisible.toggle()
-        }
+        // Structural removal of iOS Liquid Glass toolbar items should not
+        // animate their containers independently from the text viewport.
+        controlsVisible.toggle()
     }
 
     // MARK: - Optional continuous reading

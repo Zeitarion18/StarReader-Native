@@ -72,7 +72,7 @@ jobs:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
           assert info.get("CFBundleShortVersionString") == "0.5.1", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "52", info.get("CFBundleVersion")
+          assert info.get("CFBundleVersion") == "53", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -92,6 +92,26 @@ jobs:
           assert ".toolbar(controlsVisible ? .visible : .hidden, for: .navigationBar)" not in source, "Hiding navigation bar invalidates pagination"
           assert ".frame(height: 29)" in source, "Always-visible info row must retain its fixed height"
           print("Verified stable navigation footprint and 29pt footer.")
+          PY
+
+      - name: Verify Liquid Glass toolbar fully disappears in reading mode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          toolbar = src.split("        .toolbar {", 1)[1].split(
+              "        // Never toggle .hidden for the navigation bar.", 1
+          )[0]
+          assert "if controlsVisible {" in toolbar
+          assert "ToolbarItem(placement: .topBarLeading)" in toolbar
+          assert "ToolbarItemGroup(placement: .topBarTrailing)" in toolbar
+          assert toolbar.index("if controlsVisible {") < toolbar.index("ToolbarItem(")
+          assert ".opacity(controlsVisible ? 1 : 0)" not in toolbar
+          assert ".allowsHitTesting(controlsVisible)" not in toolbar
+          assert ".toolbar(.visible, for: .navigationBar)" in src
+          assert ".toolbarBackground(pageBackground, for: .navigationBar)" in src
+          assert ".navigationTitle(controlsVisible ? chapter.displayTitle : \"\")" in src
+          print("PASS: hidden reading mode removes both Liquid Glass toolbar groups.")
           PY
 
       - name: Verify system-native text selection
