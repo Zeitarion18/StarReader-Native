@@ -7,6 +7,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var progressByBook: [String: ReaderProgress] = [:]
     @Published private(set) var annotations: [ReaderAnnotation] = []
     @Published private(set) var bookmarks: [ReaderBookmark] = []
+    @Published private(set) var readingStats = ReadingStatistics()
     @Published private(set) var pendingSummary: ImportSummary?
     @Published var statusMessage: String?
 
@@ -576,6 +577,57 @@ final class LibraryStore: ObservableObject {
         loadFromDisk()
     }
 
+    // MARK: - Activity tracking (0.5.3)
+
+    /// The existing preview_state.json is part of StarReader's checked ZIP
+    /// backup. Keeping readingStats within that file makes restoring statistics
+    /// atomic with restoring notes, bookmarks and progress.
+    func recordReadingTime(for chapterID: String, from start: Date, to end: Date) {
+        guard chapter(for: chapterID) != nil else { return }
+        var updated = readingStats
+        updated.recordReading(from: start, to: end, chapterID: chapterID)
+        if updated != readingStats { persistReadingStats(updated) }
+    }
+
+    func recordVisitedPage(
+        for chapter: LibraryChapter,
+        start: Int,
+        end: Int,
+        totalLength: Int,
+        pageCount: Int
+    ) {
+        var updated = readingStats
+        // Stable enough across launches, and invalidated when the number of
+        // paragraphs/characters changes as a result of a chapter edit.
+        let revision = "\(chapter.paragraphs.count):\(chapter.totalCharacters)"
+        updated.visitPage(
+            chapterID: chapter.id,
+            revision: revision,
+            start: start,
+            end: end,
+            totalLength: totalLength,
+            pageCount: pageCount
+        )
+        if updated != readingStats { persistReadingStats(updated) }
+    }
+
+    private func persistReadingStats(_ updated: ReadingStatistics) {
+        do {
+            let encoded = try JSONEncoder().encode(updated)
+            let object = try JSONSerialization.jsonObject(with: encoded)
+            var nextState = stateObject
+            nextState["readingStats"] = object
+            let stateData = try JSONSerialization.data(
+                withJSONObject: nextState, options: [.prettyPrinted, .sortedKeys]
+            )
+            try stateData.write(to: stateURL, options: .atomic)
+            stateObject = nextState
+            readingStats = updated
+        } catch {
+            statusMessage = "Не удалось сохранить статистику: " + error.localizedDescription
+        }
+    }
+
     func recordProgress(for chapter: LibraryChapter, paragraph: Int, offset: Int = 0) {
         let safeParagraph = min(max(0, paragraph), max(0, chapter.paragraphs.count - 1))
         let currentLength = chapter.paragraphs.indices.contains(safeParagraph)
@@ -612,6 +664,7 @@ final class LibraryStore: ObservableObject {
             progressByBook = [:]
             annotations = []
             bookmarks = []
+            readingStats = ReadingStatistics()
             stateObject = freshState()
             return
         }
@@ -638,6 +691,14 @@ final class LibraryStore: ObservableObject {
                 )
             }
             progressByBook = parsed
+            if let raw = stateObject["readingStats"],
+               let data = try? JSONSerialization.data(withJSONObject: raw),
+               let decoded = try? JSONDecoder().decode(ReadingStatistics.self, from: data),
+               decoded.schema == 1 {
+                readingStats = decoded
+            } else {
+                readingStats = ReadingStatistics()
+            }
             loadRecordCollections()
         } catch {
             statusMessage = "Не удалось открыть локальную библиотеку: \(error.localizedDescription)"
@@ -665,6 +726,15 @@ final class LibraryStore: ObservableObject {
             "progress": [String: Any](),
             "annotations": [Any](),
             "bookmarks": [Any](),
+            "readingStats": [
+                "schema": 1,
+                "days": [String: Any](),
+                "coverageByChapter": [String: Any](),
+                "revisionByChapter": [String: Any](),
+                "secondsByChapter": [String: Any](),
+                "secondsByHour": [String: Any](),
+                "pagesByChapter": [String: Any]()
+            ],
             "settings": [
                 "fontSize": 19,
                 "lineHeight": 1.7,

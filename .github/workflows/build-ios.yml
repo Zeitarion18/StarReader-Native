@@ -71,8 +71,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.5.2", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "55", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.3", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "56", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -321,6 +321,48 @@ jobs:
           assert "jump?.offset ?? saved.offset" in reader
           assert "native.page(for: targetParagraph, offset: targetOffset)" in reader
           print("PASS: both record jumps open ReaderView directly with precise saved offsets.")
+          PY
+
+      - name: Test persistent reading statistics and unique pages
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/LibraryModels.swift \
+            Sources/StarReaderNative/Models/ReadingStatistics.swift \
+            Tests/ReadingStatisticsSmoke.swift \
+            -o /tmp/starreader-reading-statistics-tests
+          /tmp/starreader-reading-statistics-tests
+
+      - name: Verify four approved statistics features without estimated reading time
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          view = Path("Sources/StarReaderNative/Views/ReadingStatisticsView.swift").read_text()
+          model = Path("Sources/StarReaderNative/Models/ReadingStatistics.swift").read_text()
+          backup = Path("Sources/StarReaderNative/Services/LibraryBackupExporter.swift").read_text()
+          assert "ReadingStatisticsView(store: store)" in library
+          assert "statisticsShortcut" in library
+          assert "startReadingSession()" in reader
+          assert "endReadingSession()" in reader
+          assert "scenePhase" in reader
+          assert "lastTouch.addingTimeInterval(110)" in reader
+          assert "recordVisiblePage()" in reader
+          assert "NativeTextPagePlan(" in reader
+          assert "accountActiveTime" in reader
+          assert '"readingStats"' in store
+          assert 'JSONEncoder().encode(updated)' in store
+          assert 'JSONDecoder().decode(ReadingStatistics.self' in store
+          assert "data/preview_state.json" in backup
+          assert "coverageByChapter" in model
+          assert "previousLength" in model and "max(0, merged.reduce" in model
+          assert "Calendar.current" in view and "Chart(graphPoints)" in view
+          assert "activityStreak()" in view and "favoriteHour" in view
+          assert "Прогресс библиотеки" in view
+          assert "Статистика чтения" in view
+          assert "мин до конца" not in reader
+          print("PASS: history, calendar, progress, unique pages, background pause, ZIP persistence.")
           PY
 
       - name: Package unsigned IPA

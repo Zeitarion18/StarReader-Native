@@ -19,6 +19,7 @@ struct LibraryView: View {
     @State private var isReadingDocx = false
     @State private var pendingDocx: ImportedDocxChapter?
     @State private var isRecordsPresented = false
+    @State private var isStatisticsPresented = false
     @State private var isConfirmationPresented = false
     @State private var isSuccessPresented = false
     @State private var isImporting = false
@@ -46,6 +47,7 @@ struct LibraryView: View {
                     }
 
                     notesShortcut
+                    statisticsShortcut
                     backupShortcut
 
                     HStack(spacing: 7) {
@@ -83,13 +85,20 @@ struct LibraryView: View {
             .navigationTitle("StarReader")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button {
                         isRecordsPresented = true
                     } label: {
                         Image(systemName: "text.book.closed")
                     }
                     .accessibilityLabel("Заметки и закладки")
+
+                    Button {
+                        isStatisticsPresented = true
+                    } label: {
+                        Image(systemName: "chart.bar.xaxis")
+                    }
+                    .accessibilityLabel("Статистика чтения")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -129,6 +138,9 @@ struct LibraryView: View {
             }
             .navigationDestination(isPresented: $isRecordsPresented) {
                 NotesAndBookmarksView(store: store)
+            }
+            .navigationDestination(isPresented: $isStatisticsPresented) {
+                ReadingStatisticsView(store: store)
             }
     }
 
@@ -407,7 +419,7 @@ struct LibraryView: View {
                     Text(isExporting ? "Создаём ZIP…" : "Резервная копия библиотеки")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(palette.text)
-                    Text("Экспорт глав, заметок, закладок и прогресса")
+                    Text("Экспорт глав, записей, прогресса и статистики")
                         .font(.system(size: 12))
                         .foregroundStyle(palette.secondary)
                 }
@@ -461,6 +473,41 @@ struct LibraryView: View {
             paragraphSpacing: paragraphSpacing,
             palette: palette
         )
+    }
+
+    private var statisticsShortcut: some View {
+        Button {
+            isStatisticsPresented = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.system(size: 20))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Статистика чтения")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(palette.text)
+                    let today = Calendar.current.startOfDay(for: Date())
+                    let seconds = store.readingStats.seconds(
+                        from: today, through: today
+                    )
+                    Text("Сегодня: \(Int((seconds / 60).rounded())) мин · \(Int(store.readingStats.pages(from: today, through: today).rounded())) новых стр.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+            }
+            .padding(16)
+            .background(
+                palette.surface,
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var notesShortcut: some View {

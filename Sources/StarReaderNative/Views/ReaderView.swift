@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 private struct ReaderEditRequest: Identifiable {
     let id = UUID()
@@ -14,6 +15,7 @@ private struct ParagraphFramesKey: PreferenceKey {
 
 struct ReaderView: View {
     @Environment(\.readerPalette) private var palette
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var store: LibraryStore
     private let initialChapter: LibraryChapter
     let jump: ReaderJump?
@@ -52,6 +54,14 @@ struct ReaderView: View {
     @State private var composingSelection: ReaderTextSelection?
     @State private var editorRequest: ReaderEditRequest?
     @State private var lastEditMessage: String?
+    @State private var lastReadingAccounted: Date?
+    @State private var lastReadingInteraction: Date?
+
+    private var activityBlocked: Bool {
+        showReaderSettings || selectedAnnotation != nil ||
+        composingSelection != nil || editorRequest != nil ||
+        lastEditMessage != nil
+    }
 
     private var pageBackground: Color { palette.background }
 
@@ -232,6 +242,25 @@ struct ReaderView: View {
             }
             .presentationDragIndicator(.visible)
         }
+        .onAppear { startReadingSession() }
+        .onDisappear { endReadingSession() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                startReadingSession()
+            } else {
+                endReadingSession()
+            }
+        }
+        .onChange(of: activityBlocked) { _, blocked in
+            if blocked {
+                endReadingSession()
+            } else {
+                startReadingSession()
+            }
+        }
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { date in
+            accountActiveTime(until: date)
+        }
     }
 
     // MARK: - Actual page-based reading
@@ -353,6 +382,7 @@ struct ReaderView: View {
             lastMeasuredHeight = Double(height)
         }
         hasRestored = true
+        recordVisiblePage()
     }
 
     private func changePage(by delta: Int) {
@@ -369,12 +399,66 @@ struct ReaderView: View {
             paragraph: location.paragraph,
             offset: location.offset
         )
+        recordVisiblePage()
+        readingDidInteract()
     }
 
     private func toggleControls() {
         // Structural removal of iOS Liquid Glass toolbar items should not
         // animate their containers independently from the text viewport.
         controlsVisible.toggle()
+        readingDidInteract()
+    }
+
+    // MARK: - Active reading statistics
+
+    private func startReadingSession() {
+        guard scenePhase == .active, !activityBlocked else { return }
+        let now = Date()
+        lastReadingAccounted = now
+        lastReadingInteraction = now
+        recordVisiblePage()
+    }
+
+    private func endReadingSession() {
+        accountActiveTime(until: Date())
+        lastReadingAccounted = nil
+        lastReadingInteraction = nil
+    }
+
+    private func readingDidInteract() {
+        guard scenePhase == .active, !activityBlocked else { return }
+        let now = Date()
+        accountActiveTime(until: now)
+        if lastReadingInteraction.map({
+            now.timeIntervalSince($0) > 110
+        }) ?? true {
+            lastReadingAccounted = now
+        }
+        lastReadingInteraction = now
+    }
+
+    private func accountActiveTime(until now: Date) {
+        guard let previous = lastReadingAccounted,
+              let lastTouch = lastReadingInteraction else { return }
+        let cutoff = min(now, lastTouch.addingTimeInterval(110))
+        let interval = cutoff.timeIntervalSince(previous)
+        // Batch writes to avoid thrashing preview_state.json on drag gestures.
+        guard interval >= 1 else { return }
+        store.recordReadingTime(for: chapter.id, from: previous, to: cutoff)
+        lastReadingAccounted = cutoff
+    }
+
+    private func recordVisiblePage() {
+        guard let plan = nativePlan, plan.pageCount > 0 else { return }
+        let range = plan.range(at: pageIndex)
+        store.recordVisitedPage(
+            for: chapter,
+            start: range.location,
+            end: NSMaxRange(range),
+            totalLength: plan.source.attributedText.length,
+            pageCount: plan.pageCount
+        )
     }
 
     // MARK: - Optional continuous reading
@@ -443,6 +527,7 @@ struct ReaderView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5).onChanged { _ in
                     if hasRestoredScroll { hasScrolled = true }
+                    readingDidInteract()
                 }
             )
             .onPreferenceChange(ParagraphFramesKey.self) { frames in
@@ -453,6 +538,7 @@ struct ReaderView: View {
                     currentOffset = 0
                     if nativePlan != nil {
                         pageIndex = nativePlan?.page(for: nearest, offset: 0) ?? 0
+                        recordVisiblePage()
                     }
                     store.recordProgress(for: chapter, paragraph: nearest)
                 }
