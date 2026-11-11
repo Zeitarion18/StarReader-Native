@@ -342,6 +342,106 @@ final class LibraryStore: ObservableObject {
         return newChapter
     }
 
+    // MARK: - All-or-nothing DOCX volume import (0.5.5)
+
+    /// Adds a selected set of sections with one library JSON write. A single
+    /// original DOCX is shared by all generated chapters, so backups preserve
+    /// the exact source without unnecessary duplicate files.
+    @discardableResult
+    func importDocxVolume(
+        _ document: ImportedDocxChapter,
+        work: String,
+        volume: String,
+        sections: [VolumeDocxSplitter.Section]
+    ) throws -> Int {
+        let fm = FileManager.default
+        let previousLibrary: Data? = fm.fileExists(atPath: libraryURL.path)
+            ? try Data(contentsOf: libraryURL) : nil
+        let previousState: Data? = fm.fileExists(atPath: stateURL.path)
+            ? try Data(contentsOf: stateURL) : nil
+        let batchID = UUID().uuidString
+        let originalName = "volume-" + batchID + ".docx"
+        let chapters = sections.map { section in
+            ChapterLibraryMutation.BatchChapter(
+                id: UUID().uuidString,
+                title: section.title,
+                paragraphs: section.paragraphs.map {
+                    ChapterLibraryMutation.Paragraph(
+                        text: $0.text, heading: $0.heading
+                    )
+                }
+            )
+        }
+        // Fail before writing anything if one selected section is empty,
+        // duplicated, or its destination has invalid library JSON.
+        let newLibrary = try ChapterLibraryMutation.appendBatch(
+            to: previousLibrary,
+            series: work,
+            volume: volume,
+            chapters: chapters,
+            originalFile: originalName
+        )
+        let parsed = try LibrarySnapshot.parse(newLibrary)
+        let existingIDs = Set(
+            (previousLibrary.flatMap { try? LibrarySnapshot.parse($0) })?
+                .chapters.map(\.id) ?? []
+        )
+        guard parsed.chapters.count == existingIDs.count + chapters.count else {
+            throw ChapterLibraryMutation.Failure.invalidLibrary
+        }
+
+        let backup = rootURL
+            .appendingPathComponent("Imports", isDirectory: true)
+            .appendingPathComponent("BeforeVolume-" + batchID, isDirectory: true)
+        let originals = rootURL.appendingPathComponent(
+            "originals", isDirectory: true
+        )
+        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
+        try fm.createDirectory(at: originals, withIntermediateDirectories: true)
+        // A recoverable copy is created BEFORE any live file is changed.
+        if let previousLibrary {
+            try previousLibrary.write(
+                to: backup.appendingPathComponent("qt_library.json"),
+                options: .atomic
+            )
+        }
+        if let previousState {
+            try previousState.write(
+                to: backup.appendingPathComponent("preview_state.json"),
+                options: .atomic
+            )
+        }
+
+        let originalURL = originals.appendingPathComponent(originalName)
+        do {
+            try document.originalData.write(to: originalURL, options: .atomic)
+            try newLibrary.write(to: libraryURL, options: .atomic)
+        } catch {
+            let failed = error
+            do {
+                if let previousLibrary {
+                    try previousLibrary.write(
+                        to: libraryURL, options: .atomic
+                    )
+                } else if fm.fileExists(atPath: libraryURL.path) {
+                    try fm.removeItem(at: libraryURL)
+                }
+                try? fm.removeItem(at: originalURL)
+            } catch {
+                throw NSError(
+                    domain: "StarReader.VolumeImport", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Массовый импорт не завершён, откат библиотеки не удался. " +
+                        "Прежний JSON сохранён в Imports/BeforeVolume. " +
+                        "Не импортируй новые файлы до восстановления."]
+                )
+            }
+            throw failed
+        }
+        loadFromDisk()
+        return chapters.count
+    }
+
     // MARK: - Safe chapter editing
 
     func previewChapterEdits(

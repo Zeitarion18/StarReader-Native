@@ -18,6 +18,9 @@ struct LibraryView: View {
     @State private var isDocxPickerPresented = false
     @State private var isReadingDocx = false
     @State private var pendingDocx: ImportedDocxChapter?
+    @State private var isVolumePickerPresented = false
+    @State private var isReadingVolumeDocx = false
+    @State private var pendingVolumeDocx: ImportedDocxChapter?
     @State private var isRecordsPresented = false
     @State private var isStatisticsPresented = false
     @State private var isConfirmationPresented = false
@@ -46,6 +49,7 @@ struct LibraryView: View {
                         worksSection
                     }
 
+                    volumeImportShortcut
                     notesShortcut
                     statisticsShortcut
                     backupShortcut
@@ -110,11 +114,19 @@ struct LibraryView: View {
                     .accessibilityLabel("Экспортировать резервную копию ZIP")
 
                     Button {
+                        isVolumePickerPresented = true
+                    } label: {
+                        Image(systemName: "books.vertical.fill")
+                    }
+                    .disabled(isReadingVolumeDocx || isReadingDocx)
+                    .accessibilityLabel("Импортировать целый том DOCX")
+
+                    Button {
                         isDocxPickerPresented = true
                     } label: {
                         Image(systemName: "doc.badge.plus")
                     }
-                    .disabled(isReadingDocx)
+                    .disabled(isReadingDocx || isReadingVolumeDocx)
                     .accessibilityLabel("Добавить главу из DOCX")
 
                     Button {
@@ -231,8 +243,52 @@ struct LibraryView: View {
             }
     }
 
-    private var confirmationNavigation: some View {
+    private var volumeImportNavigation: some View {
         docxImportNavigation
+            .fileImporter(
+                isPresented: $isVolumePickerPresented,
+                allowedContentTypes: [
+                    UTType(filenameExtension: "docx")
+                        ?? UTType(importedAs: "org.openxmlformats.wordprocessingml.document")
+                ],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first,
+                          !isReadingVolumeDocx, !isReadingDocx else { return }
+                    isReadingVolumeDocx = true
+                    Task {
+                        let access = url.startAccessingSecurityScopedResource()
+                        defer {
+                            if access { url.stopAccessingSecurityScopedResource() }
+                            isReadingVolumeDocx = false
+                        }
+                        do {
+                            let parsed = try await Task.detached(
+                                priority: .userInitiated
+                            ) {
+                                try SingleDocxImporter.read(from: url)
+                            }.value
+                            pendingVolumeDocx = parsed
+                        } catch {
+                            store.statusMessage = error.localizedDescription
+                        }
+                    }
+                case .failure(let error):
+                    store.statusMessage = error.localizedDescription
+                }
+            }
+            .sheet(item: $pendingVolumeDocx) { document in
+                VolumeDocxImportSheet(store: store, document: document) { count, tome in
+                    pendingVolumeDocx = nil
+                    store.statusMessage = "Импортировано \(count) разделов в «\(tome)»."
+                }
+            }
+    }
+
+    private var confirmationNavigation: some View {
+        volumeImportNavigation
             .confirmationDialog(
                 "Восстановить библиотеку?",
                 isPresented: $isConfirmationPresented,
@@ -404,6 +460,40 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var volumeImportShortcut: some View {
+        Button {
+            isVolumePickerPresented = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "books.vertical.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isReadingVolumeDocx ? "Читаем Word…" : "Импортировать целый том")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(palette.text)
+                    Text("Разделить DOCX на главы, пролог и эпилог")
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+                Spacer(minLength: 5)
+                if isReadingVolumeDocx {
+                    ProgressView().tint(palette.accent)
+                } else {
+                    Image(systemName: "square.and.arrow.down")
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+            .padding(16)
+            .background(
+                palette.surface, in: RoundedRectangle(cornerRadius: 18)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadingVolumeDocx || isReadingDocx)
     }
 
     private var backupShortcut: some View {

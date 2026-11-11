@@ -71,8 +71,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.5.4", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "57", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.5", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "58", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -395,6 +395,51 @@ jobs:
           assert 'workSelection = matchingWorks[0]' in view
           assert 'newVolume = proposed' in view
           print("PASS: DOCX type cards, automatic work/volume, editable title, preview and safe save.")
+          PY
+
+      - name: Test safe complete DOCX volume split and atomic chapter import
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/DocxImportSuggestion.swift \
+            Sources/StarReaderNative/Services/VolumeDocxSplitter.swift \
+            Sources/StarReaderNative/Services/ChapterLibraryMutation.swift \
+            Tests/VolumeDocxSplitterSmoke.swift \
+            -o /tmp/starreader-volume-split-tests
+          /tmp/starreader-volume-split-tests
+
+      - name: Verify complete Word import preview, boundaries and backup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          view = Path("Sources/StarReaderNative/Views/VolumeDocxImportSheet.swift").read_text()
+          model = Path("Sources/StarReaderNative/Services/VolumeDocxSplitter.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          mutation = Path("Sources/StarReaderNative/Services/ChapterLibraryMutation.swift").read_text()
+          exporter = Path("Sources/StarReaderNative/Services/LibraryBackupExporter.swift").read_text()
+          assert "VolumeDocxSplitter.detect(in: document)" in view
+          assert "VolumeDocxSplitter.sections(" in view
+          assert "Button(role: .destructive)" in view
+          assert "newBoundaryParagraph" in view
+          assert "showSaveConfirmation" in view
+          assert "duplicateTitles" in view
+          assert "selectedSections.count" in view
+          assert "BeforeVolume-" in store
+          assert "importDocxVolume(" in store
+          assert "ChapterLibraryMutation.appendBatch(" in store
+          assert "originalData.write(to: originalURL" in store
+          assert "previousLibrary.write(" in store
+          assert "appendBatch(" in mutation
+          assert "Set(books.compactMap" in mutation
+          assert "pendingVolumeDocx" in library
+          assert "isVolumePickerPresented" in library
+          assert "VolumeDocxImportSheet(store: store" in library
+          assert "word/document.xml" in Path(
+              "Sources/StarReaderNative/Services/SingleDocxImporter.swift"
+          ).read_text()
+          assert "let required = try Set" in exporter
+          assert "let paragraphs = Array(document.paragraphs[lower..<upper])" in model
+          print("PASS: detected/manual boundaries, selected sections, bulk JSON write, one original, backup and UI.")
           PY
 
       - name: Package unsigned IPA
