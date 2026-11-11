@@ -71,8 +71,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.5.3", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "56", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.4", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "57", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -363,6 +363,38 @@ jobs:
           assert "Статистика чтения" in view
           assert "мин до конца" not in reader
           print("PASS: history, calendar, progress, unique pages, background pause, ZIP persistence.")
+          PY
+
+      - name: Test intelligent DOCX filenames and document kinds
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/DocxImportSuggestion.swift \
+            Tests/DocxImportSuggestionSmoke.swift \
+            -o /tmp/starreader-docx-smart-import-tests
+          /tmp/starreader-docx-smart-import-tests
+
+      - name: Verify smart import preview, library safety and five type cards
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          parser = Path("Sources/StarReaderNative/Models/DocxImportSuggestion.swift").read_text()
+          view = Path("Sources/StarReaderNative/Views/DocxChapterImportSheet.swift").read_text()
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          assert "DocxImportSuggestion.infer(" in view
+          assert "document.sourceFileName" in view
+          assert "chapterKind.libraryTitle(" in view
+          assert "ForEach(DocxDocumentKind.allCases)" in view
+          assert "В БИБЛИОТЕКЕ БУДЕТ ОТОБРАЖАТЬСЯ" in view
+          assert "showDuplicateConfirmation" in view
+          assert "save(allowDuplicate: true)" in view
+          assert "store.importDocxChapter(" in view
+          assert "BeforeDocx-" in store
+          assert "originalData.write" in store
+          for case in ("chapter", "prologue", "epilogue", "sideStory", "afterword"):
+              assert case in parser, case
+          assert 'workSelection = matchingWorks[0]' in view
+          assert 'newVolume = proposed' in view
+          print("PASS: DOCX type cards, automatic work/volume, editable title, preview and safe save.")
           PY
 
       - name: Package unsigned IPA
