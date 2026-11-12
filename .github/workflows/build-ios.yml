@@ -540,8 +540,8 @@ jobs:
           assert "snapshot.chapters(for: volume.series, volume: volume.title)" in store
           assert "try SingleDocxImporter.read(from: destination)" in exporter
           assert "fm.temporaryDirectory" in exporter
-          assert "qt_library.json" not in exporter
-          assert "preview_state.json" not in exporter
+          assert "write(to: libraryURL" not in exporter
+          assert "write(to: stateURL" not in exporter
           assert 'Экспортировать том в Word' in library
           assert 'Экспортировать главу в Word' in library
           assert 'Экспортировать главу в Word' in reader
