@@ -72,7 +72,7 @@ jobs:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
           assert info.get("CFBundleShortVersionString") == "0.5.5", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "58", info.get("CFBundleVersion")
+          assert info.get("CFBundleVersion") == "59", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -440,6 +440,24 @@ jobs:
           assert "let required = try Set" in exporter
           assert "let paragraphs = Array(document.paragraphs[lower..<upper])" in model
           print("PASS: detected/manual boundaries, selected sections, bulk JSON write, one original, backup and UI.")
+          PY
+
+      - name: Verify installed version is visible and read dynamically
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import plistlib
+          view = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          assert 'Bundle.main.infoDictionary' in view
+          assert 'info["CFBundleShortVersionString"]' in view
+          assert 'info["CFBundleVersion"]' in view
+          assert 'Label(installedVersionLabel, systemImage: "info.circle")' in view
+          assert 'Установленная версия StarReader' in view
+          info = plistlib.loads(Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Info.plist").read_bytes())
+          assert info["CFBundleShortVersionString"] == "0.5.5"
+          assert info["CFBundleVersion"] == "59"
+          assert info["CFBundleIdentifier"] == "dev.starreader.personalreader"
+          print("PASS: version and build shown directly from installed IPA metadata.")
           PY
 
       - name: Package unsigned IPA

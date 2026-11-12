@@ -27,6 +27,15 @@ struct LibraryView: View {
     @State private var isSuccessPresented = false
     @State private var isImporting = false
 
+    /// Read the installed app's Info.plist rather than a manually maintained
+    /// version string. Automatically updates whenever a new IPA is installed.
+    private var installedVersionLabel: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info["CFBundleVersion"] as? String ?? "—"
+        return "Версия \(version) · сборка \(build)"
+    }
+
     var body: some View {
         NavigationStack {
             confirmationNavigation
@@ -341,6 +350,12 @@ struct LibraryView: View {
             Text("\(store.snapshot.works.count) произведений · \(store.snapshot.chapters.count) глав")
                 .font(.system(size: 13))
                 .foregroundStyle(palette.secondary)
+
+            Label(installedVersionLabel, systemImage: "info.circle")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.secondary)
+                .padding(.top, 7)
+                .accessibilityLabel("Установленная версия StarReader: \(installedVersionLabel)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
