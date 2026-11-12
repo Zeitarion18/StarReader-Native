@@ -711,6 +711,8 @@ private struct WorkDetailView: View {
     let approximate: Bool
     let work: String
     @State private var volumeToDelete: LibraryVolume?
+    @State private var wordToShare: WordExportShareItem?
+    @State private var isExportingWord = false
 
     var body: some View {
         ScrollView {
@@ -782,6 +784,13 @@ private struct WorkDetailView: View {
                                 }
                                 .buttonStyle(.plain)
                                 Menu {
+                                    Button {
+                                        exportWordVolume(volume)
+                                    } label: {
+                                        Label("Экспортировать том в Word", systemImage: "square.and.arrow.up")
+                                    }
+                                    .disabled(isExportingWord || store.chapters(for: work, volume: volume.title).isEmpty)
+
                                     Button(role: .destructive) {
                                         volumeToDelete = volume
                                     } label: {
@@ -820,6 +829,9 @@ private struct WorkDetailView: View {
         }
         .toolbarBackground(palette.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .sheet(item: $wordToShare) { item in
+            WordExportShareSheet(url: item.url)
+        }
         .alert(
             "Удалить том?",
             isPresented: Binding(
@@ -851,6 +863,20 @@ private struct WorkDetailView: View {
         }
     }
 
+    private func exportWordVolume(_ volume: LibraryVolume) {
+        guard !isExportingWord else { return }
+        isExportingWord = true
+        Task {
+            do {
+                let url = try await store.exportVolumeWord(volume)
+                wordToShare = WordExportShareItem(url: url)
+            } catch {
+                store.statusMessage = error.localizedDescription
+            }
+            isExportingWord = false
+        }
+    }
+
     private func missingSection(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 14))
@@ -868,6 +894,8 @@ private struct VolumeDetailView: View {
     let approximate: Bool
     let volume: LibraryVolume
     @State private var chapterToDelete: LibraryChapter?
+    @State private var wordToShare: WordExportShareItem?
+    @State private var isExportingWord = false
 
     private var chapters: [LibraryChapter] {
         store.chapters(for: volume.series, volume: volume.title)
@@ -950,6 +978,13 @@ private struct VolumeDetailView: View {
                             }
                             .buttonStyle(.plain)
                             Menu {
+                                Button {
+                                    exportWordChapter(chapter)
+                                } label: {
+                                    Label("Экспортировать главу в Word", systemImage: "square.and.arrow.up")
+                                }
+                                .disabled(isExportingWord)
+
                                 Button(role: .destructive) {
                                     chapterToDelete = chapter
                                 } label: {
@@ -984,9 +1019,21 @@ private struct VolumeDetailView: View {
             ToolbarItem(placement: .topBarLeading) {
                 ReaderBackButton()
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    exportWordVolume()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .disabled(isExportingWord || chapters.isEmpty)
+                .accessibilityLabel("Экспортировать том в Word")
+            }
         }
         .toolbarBackground(palette.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .sheet(item: $wordToShare) { item in
+            WordExportShareSheet(url: item.url)
+        }
         .alert(
             "Удалить главу?",
             isPresented: Binding(
@@ -1017,6 +1064,35 @@ private struct VolumeDetailView: View {
             Text(store.statusMessage ?? "")
         }
     }
+
+    private func exportWordChapter(_ chapter: LibraryChapter) {
+        guard !isExportingWord else { return }
+        isExportingWord = true
+        Task {
+            do {
+                let url = try await store.exportChapterWord(chapterID: chapter.id)
+                wordToShare = WordExportShareItem(url: url)
+            } catch {
+                store.statusMessage = error.localizedDescription
+            }
+            isExportingWord = false
+        }
+    }
+
+    private func exportWordVolume() {
+        guard !isExportingWord else { return }
+        isExportingWord = true
+        Task {
+            do {
+                let url = try await store.exportVolumeWord(volume)
+                wordToShare = WordExportShareItem(url: url)
+            } catch {
+                store.statusMessage = error.localizedDescription
+            }
+            isExportingWord = false
+        }
+    }
+
 }
 
 

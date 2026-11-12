@@ -54,13 +54,17 @@ struct ReaderView: View {
     @State private var composingSelection: ReaderTextSelection?
     @State private var editorRequest: ReaderEditRequest?
     @State private var lastEditMessage: String?
+    @State private var wordToShare: WordExportShareItem?
+    @State private var isExportingWord = false
+    @State private var wordExportError: String?
     @State private var lastReadingAccounted: Date?
     @State private var lastReadingInteraction: Date?
 
     private var activityBlocked: Bool {
         showReaderSettings || selectedAnnotation != nil ||
         composingSelection != nil || editorRequest != nil ||
-        lastEditMessage != nil
+        lastEditMessage != nil || wordToShare != nil ||
+        isExportingWord
     }
 
     private var pageBackground: Color { palette.background }
@@ -169,6 +173,14 @@ struct ReaderView: View {
                     .accessibilityLabel("Редактировать главу")
 
                     Button {
+                        exportCurrentChapterWord()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(isExportingWord)
+                    .accessibilityLabel("Экспортировать главу в Word")
+
+                    Button {
                         showReaderSettings = true
                     } label: {
                         Image(systemName: "textformat.size")
@@ -204,6 +216,20 @@ struct ReaderView: View {
             AnnotationDetailsSheet(store: store, annotationID: item.id)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $wordToShare) { item in
+            WordExportShareSheet(url: item.url)
+        }
+        .alert(
+            "Не удалось экспортировать Word",
+            isPresented: Binding(
+                get: { wordExportError != nil },
+                set: { if !$0 { wordExportError = nil } }
+            )
+        ) {
+            Button("Понятно", role: .cancel) { wordExportError = nil }
+        } message: {
+            Text(wordExportError ?? "")
         }
         .sheet(item: $editorRequest) { request in
             ChapterEditorSheet(
@@ -260,6 +286,20 @@ struct ReaderView: View {
         }
         .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { date in
             accountActiveTime(until: date)
+        }
+    }
+
+    private func exportCurrentChapterWord() {
+        guard !isExportingWord else { return }
+        isExportingWord = true
+        Task {
+            do {
+                let url = try await store.exportChapterWord(chapterID: chapter.id)
+                wordToShare = WordExportShareItem(url: url)
+            } catch {
+                wordExportError = error.localizedDescription
+            }
+            isExportingWord = false
         }
     }
 

@@ -71,8 +71,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.5.5", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "59", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.6", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "60", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -454,10 +454,102 @@ jobs:
           assert 'Label(installedVersionLabel, systemImage: "info.circle")' in view
           assert 'Установленная версия StarReader' in view
           info = plistlib.loads(Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Info.plist").read_bytes())
-          assert info["CFBundleShortVersionString"] == "0.5.5"
-          assert info["CFBundleVersion"] == "59"
+          assert info["CFBundleShortVersionString"] == "0.5.6"
+          assert info["CFBundleVersion"] == "60"
           assert info["CFBundleIdentifier"] == "dev.starreader.personalreader"
           print("PASS: version and build shown directly from installed IPA metadata.")
+          PY
+
+      - name: Test Word DOCX export XML and file integrity
+        run: |
+          swiftc \
+            Sources/StarReaderNative/Models/LibraryModels.swift \
+            Sources/StarReaderNative/Services/DocxWordprocessingML.swift \
+            Tests/DocxWordExportSmoke.swift \
+            -o /tmp/starreader-docx-export-tests
+          /tmp/starreader-docx-export-tests /tmp/starreader-word-test
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          import xml.etree.ElementTree as ET
+          folder = Path("/tmp/starreader-word-test")
+          required = {
+              "[Content_Types].xml", "_rels/.rels",
+              "word/_rels/document.xml.rels", "word/document.xml",
+              "word/styles.xml", "docProps/core.xml", "docProps/app.xml"
+          }
+          assert {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()} == required
+          out = Path("/tmp/StarReader-Test-Tome.docx")
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+              for name in sorted(required):
+                  z.write(folder / name, name)
+          with zipfile.ZipFile(out, "r") as z:
+              assert z.testzip() is None
+              assert set(z.namelist()) == required
+              for name in required:
+                  ET.fromstring(z.read(name))
+              document = ET.fromstring(z.read("word/document.xml"))
+              styles = ET.fromstring(z.read("word/styles.xml"))
+              content_types = ET.fromstring(z.read("[Content_Types].xml"))
+              relationships = ET.fromstring(z.read("_rels/.rels"))
+              assert len(styles) >= 5
+              assert len(content_types) >= 5
+              assert len(relationships) >= 3
+          w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+          output = []
+          for paragraph in document.iter(w + "p"):
+              value = ""
+              for node in paragraph.iter():
+                  if node.tag == w + "t":
+                      value += node.text or ""
+                  elif node.tag == w + "tab":
+                      value += "\t"
+                  elif node.tag == w + "br":
+                      value += "\n"
+              output.append(value)
+          expected = [
+              "Том 15",
+              "Восхождение",
+              "Глава 1. Свет для наших вечеров",
+              "Текст из исправленного редактора: Зейт держит Штандарт.",
+              "Лиара сказала: «Я & ты <3» — \"вместе\". 🌟",
+              "Строка 1\nСтрока 2\tпосле табуляции",
+              "Подзаголовок",
+              "Конец первой главы.",
+              "Глава 2. Новое начало",
+              "Исправленный второй текст.",
+              "И мир снова стал светлым."
+          ]
+          assert output == expected, (output, expected)
+          print("PASS: valid self-contained DOCX, headings, page breaks, Unicode/whitespace, edited body text, correct order.")
+          PY
+
+      - name: Verify native Word export UI, library immutability and share sheet
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          store = Path("Sources/StarReaderNative/Services/LibraryStore.swift").read_text()
+          exporter = Path("Sources/StarReaderNative/Services/DocxWordExporter.swift").read_text()
+          library = Path("Sources/StarReaderNative/Views/LibraryView.swift").read_text()
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          share = Path("Sources/StarReaderNative/Views/WordExportShareSheet.swift").read_text()
+          assert "func exportChapterWord(chapterID:" in store
+          assert "func exportVolumeWord(" in store
+          assert "DocxWordExporter.exportChapter(latest)" in store
+          assert "snapshot.chapters(for: volume.series, volume: volume.title)" in store
+          assert "try SingleDocxImporter.read(from: destination)" in exporter
+          assert "fm.temporaryDirectory" in exporter
+          assert "qt_library.json" not in exporter
+          assert "preview_state.json" not in exporter
+          assert 'Экспортировать том в Word' in library
+          assert 'Экспортировать главу в Word' in library
+          assert 'Экспортировать главу в Word' in reader
+          assert "WordExportShareSheet(url: item.url)" in library
+          assert "WordExportShareSheet(url: item.url)" in reader
+          assert "UIActivityViewController(" in share
+          assert "activityItems: [url]" in share
+          print("PASS: shareable DOCX for individual chapters and volumes, using current edited text without mutating originals.")
           PY
 
       - name: Package unsigned IPA

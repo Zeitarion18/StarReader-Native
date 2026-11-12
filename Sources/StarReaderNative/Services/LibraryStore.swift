@@ -240,6 +240,28 @@ final class LibraryStore: ObservableObject {
         }.value
     }
 
+    // MARK: - Word export from edited library text (v0.5.6)
+
+    /// Export by ID rather than passing a stale NavigationLink chapter
+    /// snapshot. The latest edits are always present in the resulting DOCX.
+    func exportChapterWord(chapterID: String) async throws -> URL {
+        guard let latest = chapter(for: chapterID) else {
+            throw LibraryModelError.invalidLibrary
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try DocxWordExporter.exportChapter(latest)
+        }.value
+    }
+
+    /// Uses the library's canonical chapter order (prologue, chapters by
+    /// number, side stories, epilogue, afterword). Never changes stored data.
+    func exportVolumeWord(_ volume: LibraryVolume) async throws -> URL {
+        let chapters = snapshot.chapters(for: volume.series, volume: volume.title)
+        return try await Task.detached(priority: .userInitiated) {
+            try DocxWordExporter.exportVolume(volume, chapters: chapters)
+        }.value
+    }
+
     // MARK: - Individual DOCX chapter imports
 
     /// Add only one document, preserving every existing chapter, note,
