@@ -71,8 +71,8 @@ jobs:
           with path.open("rb") as file:
               info = plistlib.load(file)
           assert info.get("CFBundleIdentifier") == "dev.starreader.personalreader", info.get("CFBundleIdentifier")
-          assert info.get("CFBundleShortVersionString") == "0.5.6", info.get("CFBundleShortVersionString")
-          assert info.get("CFBundleVersion") == "60", info.get("CFBundleVersion")
+          assert info.get("CFBundleShortVersionString") == "0.5.7", info.get("CFBundleShortVersionString")
+          assert info.get("CFBundleVersion") == "61", info.get("CFBundleVersion")
           launch = info.get("UILaunchStoryboardName")
           assert launch == "LaunchScreen", f"Launch screen missing: {launch!r}"
           app_bundle = Path("build/Build/Products/Release-iphoneos/StarReaderNative.app")
@@ -454,8 +454,8 @@ jobs:
           assert 'Label(installedVersionLabel, systemImage: "info.circle")' in view
           assert 'Установленная версия StarReader' in view
           info = plistlib.loads(Path("build/Build/Products/Release-iphoneos/StarReaderNative.app/Info.plist").read_bytes())
-          assert info["CFBundleShortVersionString"] == "0.5.6"
-          assert info["CFBundleVersion"] == "60"
+          assert info["CFBundleShortVersionString"] == "0.5.7"
+          assert info["CFBundleVersion"] == "61"
           assert info["CFBundleIdentifier"] == "dev.starreader.personalreader"
           print("PASS: version and build shown directly from installed IPA metadata.")
           PY
@@ -550,6 +550,31 @@ jobs:
           assert "UIActivityViewController(" in share
           assert "activityItems: [url]" in share
           print("PASS: shareable DOCX for individual chapters and volumes, using current edited text without mutating originals.")
+          PY
+
+      - name: Check quick page navigation and native selection separation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          reader = Path("Sources/StarReaderNative/Views/ReaderView.swift").read_text()
+          native = Path("Sources/StarReaderNative/Services/NativeTextPage.swift").read_text()
+          picker = Path("Sources/StarReaderNative/Views/ReaderPageJumpSheet.swift").read_text()
+          assert "ReaderPageJumpSheet(" in reader
+          assert "changePage(by: target - 1 - pageIndex)" in reader
+          assert "edgeNavigationButton(delta: -1" in reader
+          assert "edgeNavigationButton(delta: 1" in reader
+          assert "showReaderSettings || showPageJump" in reader
+          assert ".frame(height: 29)" in reader
+          assert "nativeTap.require(toFail: edgeTap)" in native
+          assert "return !edge" in native and "return edge" in native
+          assert "view.isSelectable = true" in native
+          assert "editMenuForTextIn range: NSRange" in native
+          assert "Slider(value:" in picker
+          assert "validInput" in picker
+          assert "onJump(page)" in picker
+          assert picker.count("onJump(page)") == 1
+          assert "recordProgress(" not in picker
+          print("PASS: jump UI, confirmed destination only, edge controls, native text selection retained.")
           PY
 
       - name: Package unsigned IPA

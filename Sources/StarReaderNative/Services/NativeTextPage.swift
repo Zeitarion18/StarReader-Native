@@ -179,11 +179,27 @@ struct NativeSelectablePage: UIViewRepresentable {
         right.delegate = context.coordinator
         view.addGestureRecognizer(right)
 
+        // Give single taps in the page-turn zones priority over UIKit's
+        // multi-tap word selection. Center touches never enter this recognizer,
+        // so native long-press and selection gestures remain available there.
+        let edgeTap = UITapGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.edgeTap(_:))
+        )
+        edgeTap.cancelsTouchesInView = true
+        edgeTap.delegate = context.coordinator
+        context.coordinator.edgeTapRecognizer = edgeTap
+        let nativeTaps = (view.gestureRecognizers ?? []).compactMap { $0 as? UITapGestureRecognizer }
+        view.addGestureRecognizer(edgeTap)
+        for nativeTap in nativeTaps {
+            nativeTap.require(toFail: edgeTap)
+        }
+
         let tap = UITapGestureRecognizer(
             target: context.coordinator, action: #selector(Coordinator.tap(_:))
         )
         tap.cancelsTouchesInView = false
         tap.delegate = context.coordinator
+        context.coordinator.centerTapRecognizer = tap
         view.addGestureRecognizer(tap)
         return view
     }
@@ -219,6 +235,8 @@ struct NativeSelectablePage: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         weak var view: ReaderUITextView?
+        weak var edgeTapRecognizer: UITapGestureRecognizer?
+        weak var centerTapRecognizer: UITapGestureRecognizer?
         var plan: NativeTextPagePlan?
         var chapterStart = 0
         var onTurn: ((Int) -> Void)?
@@ -279,6 +297,31 @@ struct NativeSelectablePage: UIViewRepresentable {
             onTurn?(recognizer.direction == .left ? 1 : -1)
         }
 
+        @objc func edgeTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended, let view else { return }
+            // An already selected word must not trap navigation at the edge.
+            // Explicit edge navigation dismisses that selection.
+            if view.selectedRange.length > 0 {
+                view.selectedRange = NSRange(location: 0, length: 0)
+                let x = recognizer.location(in: view).x
+                onTurn?(x < view.bounds.width / 2 ? -1 : 1)
+                return
+            }
+            tap(recognizer)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldReceive touch: UITouch
+        ) -> Bool {
+            guard let view else { return false }
+            let x = touch.location(in: view).x
+            let edge = x < view.bounds.width * 0.19 || x > view.bounds.width * 0.81
+            if gestureRecognizer === edgeTapRecognizer { return edge }
+            if gestureRecognizer === centerTapRecognizer { return !edge }
+            return true
+        }
+
         @objc func tap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let view,
                   view.selectedRange.length == 0 else { return }
@@ -322,7 +365,11 @@ struct NativeSelectablePage: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            true
+            if gestureRecognizer === edgeTapRecognizer ||
+                otherGestureRecognizer === edgeTapRecognizer {
+                return false
+            }
+            return true
         }
     }
 }

@@ -49,6 +49,7 @@ struct ReaderView: View {
     @State private var hasRestoredScroll = false
     @State private var controlsVisible = true
     @State private var showReaderSettings = false
+    @State private var showPageJump = false
     @State private var selectedAnnotation: ReaderAnnotation?
     @State private var selectedText: ReaderTextSelection?
     @State private var composingSelection: ReaderTextSelection?
@@ -61,7 +62,7 @@ struct ReaderView: View {
     @State private var lastReadingInteraction: Date?
 
     private var activityBlocked: Bool {
-        showReaderSettings || selectedAnnotation != nil ||
+        showReaderSettings || showPageJump || selectedAnnotation != nil ||
         composingSelection != nil || editorRequest != nil ||
         lastEditMessage != nil || wordToShare != nil ||
         isExportingWord
@@ -201,6 +202,18 @@ struct ReaderView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(pageBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .sheet(isPresented: $showPageJump) {
+            if let plan = nativePlan {
+                ReaderPageJumpSheet(
+                    current: pageIndex + 1,
+                    total: plan.pageCount
+                ) { target in
+                    changePage(by: target - 1 - pageIndex)
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+        }
         .sheet(isPresented: $showReaderSettings) {
             ReaderSettingsSheet(
                 fontSize: $fontSize,
@@ -368,8 +381,33 @@ struct ReaderView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if nativePlan != nil {
+                    // Dedicated tap targets lie in the empty outer margin,
+                    // outside the visible text, and never receive text gestures.
+                    let margin = max(10, (geometry.size.width - max(140, pageWidth)) / 2)
+                    HStack(spacing: 0) {
+                        edgeNavigationButton(delta: -1, width: margin)
+                        Spacer(minLength: 0)
+                        edgeNavigationButton(delta: 1, width: margin)
+                    }
+                }
+            }
         }
         .background(pageBackground)
+    }
+
+    private func edgeNavigationButton(delta: Int, width: CGFloat) -> some View {
+        Button {
+            changePage(by: delta)
+        } label: {
+            Color.clear
+                .frame(width: width)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(delta < 0 ? "Предыдущая страница" : "Следующая страница")
     }
 
     private func rebuildPagination(for size: CGSize, force: Bool = false) {
@@ -611,15 +649,34 @@ struct ReaderView: View {
             )
             let clock = context.date.formatted(date: .omitted, time: .shortened)
 
-            Text("\(current)/\(total) стр.  •  \(percentText)%  •  \(clock)")
-                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                .foregroundStyle(palette.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel(
-                    "Страница \(current) из \(total), прочитано \(percentText) процентов, время \(clock)"
-                )
+            HStack(spacing: 8) {
+                if readingMode == "pages" {
+                    Button {
+                        showPageJump = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(current)/\(total) стр.")
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(palette.accent)
+                        .padding(.horizontal, 7)
+                        .frame(height: 29)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(nativePlan == nil)
+                    .accessibilityLabel("Перейти к странице. Сейчас \(current) из \(total)")
+                } else {
+                    Text("\(current)/\(total) стр.")
+                }
+                Text("•  \(percentText)%  •  \(clock)")
+            }
+            .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+            .foregroundStyle(palette.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity)
         }
         .frame(height: 29)
         .frame(maxWidth: .infinity)
